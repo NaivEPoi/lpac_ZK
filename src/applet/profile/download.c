@@ -5,6 +5,9 @@
 #include <euicc/es10b.h>
 #include <euicc/es8p.h>
 #include <euicc/es9p.h>
+#include <euicc/base64.h>
+#include <euicc/derutil.h>
+#include <euicc/euicc.private.h>
 #include <euicc/tostr.h>
 #include <lpac/utils.h>
 
@@ -52,6 +55,306 @@ static bool is_strict_matching_id(const char *token) {
 }
 
 static void sigint_handler(__attribute__((unused)) int x) { cancelled = 1; }
+
+static int encode_der_node_to_base64(char **out, struct euicc_derutil_node *node) {
+    uint8_t *der = NULL;
+    uint32_t der_len = 0;
+    int encoded_len;
+
+    *out = NULL;
+
+    if (euicc_derutil_pack_alloc(&der, &der_len, node) < 0) {
+        free(der);
+        return -1;
+    }
+
+    encoded_len = euicc_base64_encode_len((int)der_len);
+    if (encoded_len <= 0) {
+        free(der);
+        return -1;
+    }
+
+    *out = malloc((size_t)encoded_len);
+    if (*out == NULL) {
+        free(der);
+        return -1;
+    }
+
+    if (euicc_base64_encode(*out, der, (int)der_len) < 0) {
+        free(der);
+        free(*out);
+        *out = NULL;
+        return -1;
+    }
+
+    free(der);
+    return 0;
+}
+
+static int placeholder_initiate_auth(struct euicc_ctx *ctx) {
+    static const uint8_t dummy_txid[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    static const uint8_t server_address[] = {'s', 'm', 'd', 'p', '.', 't', 'e', 's', 't', '.', 'c', 'o', 'm'};
+    static const uint8_t server_challenge[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    static const uint8_t server_signature[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    static const uint8_t euicc_ci_pk_id[] = {0x00, 0x00, 0x00, 0x00};
+    char *challenge = NULL;
+    int challenge_len;
+    struct es10b_authenticate_server_param *param = NULL;
+    struct euicc_derutil_node n_server_signed1 = {0};
+    struct euicc_derutil_node n_transaction_id = {0};
+    struct euicc_derutil_node n_euicc_challenge = {0};
+    struct euicc_derutil_node n_server_address = {0};
+    struct euicc_derutil_node n_server_challenge = {0};
+    struct euicc_derutil_node n_server_signature = {0};
+    struct euicc_derutil_node n_euicc_ci_pk_id = {0};
+    struct euicc_derutil_node n_server_certificate = {0};
+
+    if (ctx->http._internal.b64_euicc_challenge == NULL) {
+        return -1;
+    }
+
+    param = calloc(1, sizeof(*param));
+    if (param == NULL) {
+        return -1;
+    }
+
+    challenge_len = euicc_base64_decode_len(ctx->http._internal.b64_euicc_challenge);
+    if (challenge_len <= 0) {
+        goto err;
+    }
+
+    challenge = malloc((size_t)challenge_len);
+    if (challenge == NULL) {
+        goto err;
+    }
+
+    if (euicc_base64_decode((unsigned char *)challenge, ctx->http._internal.b64_euicc_challenge) < 0) {
+        goto err;
+    }
+
+    n_server_signed1.tag = 0x30;
+    n_server_signed1.pack.child = &n_transaction_id;
+
+    n_transaction_id.tag = 0x80;
+    n_transaction_id.value = dummy_txid;
+    n_transaction_id.length = (uint32_t)sizeof(dummy_txid);
+    n_transaction_id.pack.next = &n_euicc_challenge;
+
+    n_euicc_challenge.tag = 0x81;
+    n_euicc_challenge.value = (const uint8_t *)challenge;
+    n_euicc_challenge.length = 16;
+    n_euicc_challenge.pack.next = &n_server_address;
+
+    n_server_address.tag = 0x83;
+    n_server_address.value = server_address;
+    n_server_address.length = (uint32_t)sizeof(server_address);
+    n_server_address.pack.next = &n_server_challenge;
+
+    n_server_challenge.tag = 0x84;
+    n_server_challenge.value = server_challenge;
+    n_server_challenge.length = (uint32_t)sizeof(server_challenge);
+    n_server_challenge.pack.next = &n_server_signature;
+
+    n_server_signature.tag = 0x5F37;
+    n_server_signature.value = server_signature;
+    n_server_signature.length = (uint32_t)sizeof(server_signature);
+    n_server_signature.pack.next = &n_euicc_ci_pk_id;
+
+    n_euicc_ci_pk_id.tag = 0x04;
+    n_euicc_ci_pk_id.value = euicc_ci_pk_id;
+    n_euicc_ci_pk_id.length = (uint32_t)sizeof(euicc_ci_pk_id);
+    n_euicc_ci_pk_id.pack.next = &n_server_certificate;
+
+    n_server_certificate.tag = 0x30;
+
+    if (encode_der_node_to_base64(&param->b64_serverSigned1, &n_server_signed1) < 0) {
+        goto err;
+    }
+
+    n_server_signature.pack.next = NULL;
+    if (encode_der_node_to_base64(&param->b64_serverSignature1, &n_server_signature) < 0) {
+        goto err;
+    }
+
+    if (encode_der_node_to_base64(&param->b64_euiccCiPKIdToBeUsed, &n_euicc_ci_pk_id) < 0) {
+        goto err;
+    }
+
+    if (encode_der_node_to_base64(&param->b64_serverCertificate, &n_server_certificate) < 0) {
+        goto err;
+    }
+
+    ctx->http._internal.authenticate_server_param = param;
+    free(challenge);
+    return 0;
+
+err:
+    free(challenge);
+    es10b_authenticate_server_param_free(param);
+    free(param);
+    return -1;
+}
+
+static int placeholder_authenticate_client(struct euicc_ctx *ctx) {
+    static const uint8_t smdp_signature[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    struct es10b_prepare_download_param *param = NULL;
+    struct euicc_derutil_node n_smdp_signed2 = {0};
+    struct euicc_derutil_node n_transaction_id = {0};
+    struct euicc_derutil_node n_cc_required = {0};
+    struct euicc_derutil_node n_smdp_signature = {0};
+    struct euicc_derutil_node n_smdp_certificate = {0};
+
+    if (ctx->http._internal.transaction_id_bin == NULL || ctx->http._internal.transaction_id_bin_len == 0) {
+        return -1;
+    }
+
+    param = calloc(1, sizeof(*param));
+    if (param == NULL) {
+        return -1;
+    }
+
+    n_smdp_signed2.tag = 0x30;
+    n_smdp_signed2.pack.child = &n_transaction_id;
+
+    n_transaction_id.tag = 0x80;
+    n_transaction_id.value = ctx->http._internal.transaction_id_bin;
+    n_transaction_id.length = ctx->http._internal.transaction_id_bin_len;
+    n_transaction_id.pack.next = &n_cc_required;
+
+    n_cc_required.tag = 0x01;
+    n_cc_required.value = (const uint8_t *)"\x00";
+    n_cc_required.length = 1;
+
+    if (encode_der_node_to_base64(&param->b64_smdpSigned2, &n_smdp_signed2) < 0) {
+        goto err;
+    }
+
+    n_smdp_signature.tag = 0x5F37;
+    n_smdp_signature.value = smdp_signature;
+    n_smdp_signature.length = (uint32_t)sizeof(smdp_signature);
+    if (encode_der_node_to_base64(&param->b64_smdpSignature2, &n_smdp_signature) < 0) {
+        goto err;
+    }
+
+    n_smdp_certificate.tag = 0x30;
+    if (encode_der_node_to_base64(&param->b64_smdpCertificate, &n_smdp_certificate) < 0) {
+        goto err;
+    }
+
+    param->b64_profileMetadata = NULL;
+    ctx->http._internal.prepare_download_param = param;
+    return 0;
+
+err:
+    es10b_prepare_download_param_free(param);
+    free(param);
+    return -1;
+}
+
+static int send_placeholder_bpp(struct euicc_ctx *ctx, struct es10b_load_bound_profile_package_result *result) {
+    uint8_t *reqbuf = NULL;
+    uint32_t reqlen = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen = 0;
+    static const uint8_t one_byte[] = {0x01};
+    static const uint8_t second_byte[] = {0x02};
+    static const uint8_t third_byte[] = {0x03};
+    struct euicc_derutil_node n_request = {0};
+    struct euicc_derutil_node n_bf23 = {0};
+    struct euicc_derutil_node n_remote_op = {0};
+    struct euicc_derutil_node n_transaction_id = {0};
+    struct euicc_derutil_node n_control_ref = {0};
+    struct euicc_derutil_node n_smdp_otpk = {0};
+    struct euicc_derutil_node n_smdp_sign = {0};
+    struct euicc_derutil_node n_a0 = {0};
+    struct euicc_derutil_node n_87 = {0};
+    struct euicc_derutil_node n_a1 = {0};
+    struct euicc_derutil_node n_88 = {0};
+    struct euicc_derutil_node n_a3 = {0};
+    struct euicc_derutil_node n_86 = {0};
+    struct euicc_derutil_node tmpnode;
+
+    if (ctx->http._internal.transaction_id_bin == NULL || ctx->http._internal.transaction_id_bin_len == 0) {
+        return -1;
+    }
+
+    n_request.tag = 0xBF36;
+    n_request.pack.child = &n_bf23;
+
+    n_bf23.tag = 0xBF23;
+    n_bf23.pack.child = &n_remote_op;
+
+    n_remote_op.tag = 0x02;
+    n_remote_op.value = one_byte;
+    n_remote_op.length = 1;
+    n_remote_op.pack.next = &n_transaction_id;
+
+    n_transaction_id.tag = 0x80;
+    n_transaction_id.value = ctx->http._internal.transaction_id_bin;
+    n_transaction_id.length = ctx->http._internal.transaction_id_bin_len;
+    n_transaction_id.pack.next = &n_control_ref;
+
+    n_control_ref.tag = 0xA6;
+    n_control_ref.pack.next = &n_smdp_otpk;
+
+    n_smdp_otpk.tag = 0x5F49;
+    n_smdp_otpk.value = one_byte;
+    n_smdp_otpk.length = 1;
+    n_smdp_otpk.pack.next = &n_smdp_sign;
+
+    n_smdp_sign.tag = 0x5F37;
+    n_smdp_sign.value = second_byte;
+    n_smdp_sign.length = 1;
+
+    n_a0.tag = 0xA0;
+    n_a0.pack.child = &n_87;
+    n_87.tag = 0x87;
+    n_87.value = third_byte;
+    n_87.length = 1;
+
+    n_a1.tag = 0xA1;
+    n_a1.pack.child = &n_88;
+    n_88.tag = 0x88;
+    n_88.value = one_byte;
+    n_88.length = 1;
+
+    n_a3.tag = 0xA3;
+    n_a3.pack.child = &n_86;
+    n_86.tag = 0x86;
+    n_86.value = second_byte;
+    n_86.length = 1;
+
+    n_smdp_sign.pack.next = &n_a0;
+    n_a0.pack.next = &n_a1;
+    n_a1.pack.next = &n_a3;
+
+    if (euicc_derutil_pack_alloc(&reqbuf, &reqlen, &n_request) < 0) {
+        goto err;
+    }
+
+    if (es10x_command(ctx, &respbuf, &resplen, reqbuf, reqlen) < 0) {
+        goto err;
+    }
+
+    if (euicc_derutil_unpack_find_tag(&tmpnode, 0xBF37, respbuf, resplen) < 0) {
+        goto err;
+    }
+
+    result->seqNumber = 1;
+    result->iccid = NULL;
+    result->bppCommandId = ES10B_BPP_COMMAND_ID_LOAD_PROFILE_ELEMENTS;
+    result->errorReason = ES10B_ERROR_REASON_UNDEFINED;
+
+    free(reqbuf);
+    free(respbuf);
+    return 0;
+
+err:
+    free(reqbuf);
+    free(respbuf);
+    return -1;
+}
 
 static cJSON *build_download_result_json(const struct es10b_load_bound_profile_package_result *result) {
     cJSON *jdata = cJSON_CreateObject();
@@ -111,6 +414,7 @@ static int applet_main(int argc, char **argv) {
     cJSON *jmetadata = NULL;
     cJSON *jaccessRules = NULL;
     _cleanup_(es8p_metadata_free) struct es8p_metadata *profile_metadata = NULL;
+    const bool is_simulated = getenv("LPAC_CUSTOM_ISD_R_AID") != NULL;
 
     while ((opt = getopt(argc, argv, opt_string)) != -1) {
         switch (opt) {
@@ -216,19 +520,37 @@ static int applet_main(int argc, char **argv) {
     euicc_ctx.http.server_address = smdp;
 
     CANCELPOINT();
-    jprint_progress("es10b_get_euicc_challenge_and_info", smdp);
-    if (es10b_get_euicc_challenge_and_info(&euicc_ctx)) {
-        error_function_name = "es10b_get_euicc_challenge_and_info";
-        error_detail = NULL;
-        goto err;
+    if (is_simulated) {
+        jprint_progress("es10b_get_euicc_challenge_r", smdp);
+        if (es10b_get_euicc_challenge_r(&euicc_ctx, &euicc_ctx.http._internal.b64_euicc_challenge)) {
+            error_function_name = "es10b_get_euicc_challenge_r";
+            error_detail = NULL;
+            goto err;
+        }
+    } else {
+        jprint_progress("es10b_get_euicc_challenge_and_info", smdp);
+        if (es10b_get_euicc_challenge_and_info(&euicc_ctx)) {
+            error_function_name = "es10b_get_euicc_challenge_and_info";
+            error_detail = NULL;
+            goto err;
+        }
     }
 
     CANCELPOINT();
-    jprint_progress("es9p_initiate_authentication", smdp);
-    if (es9p_initiate_authentication(&euicc_ctx)) {
-        error_function_name = "es9p_initiate_authentication";
-        error_detail = strdup(euicc_ctx.http.status.message);
-        goto err;
+    if (is_simulated) {
+        jprint_progress("placeholder_initiate_auth", smdp);
+        if (placeholder_initiate_auth(&euicc_ctx)) {
+            error_function_name = "placeholder_initiate_auth";
+            error_detail = NULL;
+            goto err;
+        }
+    } else {
+        jprint_progress("es9p_initiate_authentication", smdp);
+        if (es9p_initiate_authentication(&euicc_ctx)) {
+            error_function_name = "es9p_initiate_authentication";
+            error_detail = strdup(euicc_ctx.http.status.message);
+            goto err;
+        }
     }
 
     CANCELPOINT();
@@ -240,11 +562,20 @@ static int applet_main(int argc, char **argv) {
     }
 
     CANCELPOINT();
-    jprint_progress("es9p_authenticate_client", smdp);
-    if (es9p_authenticate_client(&euicc_ctx)) {
-        error_function_name = "es9p_authenticate_client";
-        error_detail = strdup(euicc_ctx.http.status.message);
-        goto err;
+    if (is_simulated) {
+        jprint_progress("placeholder_authenticate_client", smdp);
+        if (placeholder_authenticate_client(&euicc_ctx)) {
+            error_function_name = "placeholder_authenticate_client";
+            error_detail = NULL;
+            goto err;
+        }
+    } else {
+        jprint_progress("es9p_authenticate_client", smdp);
+        if (es9p_authenticate_client(&euicc_ctx)) {
+            error_function_name = "es9p_authenticate_client";
+            error_detail = strdup(euicc_ctx.http.status.message);
+            goto err;
+        }
     }
 
     // preview here
@@ -295,26 +626,35 @@ static int applet_main(int argc, char **argv) {
     }
 
     CANCELPOINT();
-    jprint_progress("es9p_get_bound_profile_package", smdp);
-    if (es9p_get_bound_profile_package(&euicc_ctx)) {
-        error_function_name = "es9p_get_bound_profile_package";
-        error_detail = strdup(euicc_ctx.http.status.message);
-        goto err;
-    }
+    if (is_simulated) {
+        jprint_progress("send_placeholder_bpp", smdp);
+        if (send_placeholder_bpp(&euicc_ctx, &download_result)) {
+            error_function_name = "send_placeholder_bpp";
+            error_detail = NULL;
+            goto err;
+        }
+    } else {
+        jprint_progress("es9p_get_bound_profile_package", smdp);
+        if (es9p_get_bound_profile_package(&euicc_ctx)) {
+            error_function_name = "es9p_get_bound_profile_package";
+            error_detail = strdup(euicc_ctx.http.status.message);
+            goto err;
+        }
 
-    CANCELPOINT();
-    jprint_progress("es10b_load_bound_profile_package", smdp);
-    if (es10b_load_bound_profile_package(&euicc_ctx, &download_result)) {
-        jprint_progress_obj("es10b_load_bound_profile_package:result", build_download_result_json(&download_result));
+        CANCELPOINT();
+        jprint_progress("es10b_load_bound_profile_package", smdp);
+        if (es10b_load_bound_profile_package(&euicc_ctx, &download_result)) {
+            jprint_progress_obj("es10b_load_bound_profile_package:result", build_download_result_json(&download_result));
 
-        char buffer[256];
+            char buffer[256];
 
-        snprintf(buffer, sizeof(buffer), "%s,%s", euicc_bppcommandid2str(download_result.bppCommandId),
-                 euicc_errorreason2str(download_result.errorReason));
-        error_function_name = "es10b_load_bound_profile_package";
-        error_detail = strdup(buffer);
+            snprintf(buffer, sizeof(buffer), "%s,%s", euicc_bppcommandid2str(download_result.bppCommandId),
+                     euicc_errorreason2str(download_result.errorReason));
+            error_function_name = "es10b_load_bound_profile_package";
+            error_detail = strdup(buffer);
 
-        goto err;
+            goto err;
+        }
     }
 
     jprint_success(build_download_result_json(&download_result));
@@ -324,10 +664,12 @@ static int applet_main(int argc, char **argv) {
 
 err:
     fret = -1;
-    jprint_progress("es10b_cancel_session", smdp);
-    es10b_cancel_session(&euicc_ctx, ES10B_CANCEL_SESSION_REASON_ENDUSERREJECTION);
-    jprint_progress("es9p_cancel_session", smdp);
-    es9p_cancel_session(&euicc_ctx);
+    if (!is_simulated) {
+        jprint_progress("es10b_cancel_session", smdp);
+        es10b_cancel_session(&euicc_ctx, ES10B_CANCEL_SESSION_REASON_ENDUSERREJECTION);
+        jprint_progress("es9p_cancel_session", smdp);
+        es9p_cancel_session(&euicc_ctx);
+    }
     if (!cancelled) {
         jprint_error(error_function_name, error_detail);
     } else {

@@ -250,39 +250,23 @@ exit:
     return fret;
 }
 
-
-// TODO - remove euiccInfo1?? - removing may break a large number of other downstream functions
-
-//* Added transcript Nonce and smdpNonce to out keys and out object
 int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
                                    struct es10b_authenticate_server_param *resp, const char *server_address,
                                    const char *b64_euicc_challenge, const char *b64_euicc_info_1) {
-
     const char *ikey[] = {"smdpAddress", "euiccChallenge", "euiccInfo1", NULL};
-    const char *idata[] = {server_address, b64_euicc_challenge, NULL};
-
-    const char *okey[] = {"transactionId", 
-                        "serverSigned1", 
-                        "serverSignature1",
-                        "euiccCiPKIdToBeUsed", 
-                        "serverCertificate", 
-                        "transcriptNonce",          //? Added for algorithm 6 step 5
-                        "smdpNonce",                //? Added for algorithm 6 step 5 
-                        NULL};
-
-
-    const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
-
+    const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
+    const char *okey[] = {"transactionId",       "serverSigned1",     "serverSignature1",
+                          "euiccCiPKIdToBeUsed", "serverCertificate", NULL};
+    const char oobj[] = {0, 0, 0, 0, 0};
     void **optr[] = {(void **)transaction_id,
                      (void **)&resp->b64_serverSigned1,
                      (void **)&resp->b64_serverSignature1,
                      (void **)&resp->b64_euiccCiPKIdToBeUsed,
                      (void **)&resp->b64_serverCertificate,
-                     (void **)&resp->b64_transcriptNonce,       //? Added to follow the above
-                     (void **)&resp->b64_smdpNonce,             //? Added to follow the above
                      NULL};
 
-    if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/authenticateClient", ikey, idata, okey, oobj, optr)) {
+    if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/initiateAuthentication", ikey, idata, okey, oobj,
+                        optr)) {
         return -1;
     }
 
@@ -290,8 +274,6 @@ int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
     es9p_base64_trim(resp->b64_serverSignature1);
     es9p_base64_trim(resp->b64_euiccCiPKIdToBeUsed);
     es9p_base64_trim(resp->b64_serverCertificate);
-    es9p_base64_trim(resp->b64_transcriptNonce);        //? Added for above
-    es9p_base64_trim(resp->b64_smdpNonce);              //? Added for above
 
     return 0;
 }
@@ -317,43 +299,11 @@ int es9p_get_bound_profile_package_r(struct euicc_ctx *ctx, char **b64_bound_pro
 
 int es9p_authenticate_client_r(struct euicc_ctx *ctx, struct es10b_prepare_download_param *resp,
                                const char *server_address, const char *transaction_id,
-                               const char *b64_authenticate_server_response, const char *pseudonym_cert, 
-                               const char *auth_cred, const char *one_time_tok,
-                               const char *hashed_pseudonym, const char *inclusion_proof, 
-                               const char *accum_root, const char *mno_root_sig, 
-                               const char *session_binding) {
-    
-    //* Added updated values for the eligibility bundle which is forwarded to the SM-DP+
-    const char *ikey[] = {"transactionId",
-                        "authenticateServerResponse", 
-                        "pseudonymCert",                //? PCert_U
-                        "authCredential",               //? sigma_cred
-                        "oneTimeToken",                 //? T_i
-                        "hashedPseudonym"               //? Hpid
-                        "includsionProof",              //? π_inc
-                        "accumlatorRoot",               //? root_auth
-                        "mnoRootSignature",             //? sigma^root_MNO
-                        "sessionBinding",               //? Sig_sk(I_t, N_S, N_U, T_i, Hpid, PCert_U, sid)            
-                        NULL};
-
-    //* Updated to match the new elibility bundle valuse defined in zk-esim 
-    const char *idata[] = {transaction_id, 
-        b64_authenticate_server_response, 
-        pseudonym_cert, 
-        auth_cred, 
-        one_time_tok, 
-        hashed_pseudonym, 
-        inclusion_proof, 
-        accum_root, 
-        mno_root_sig, 
-        session_binding, 
-        NULL};
-
-    //TODO - check if the smdpSigned2 contains the transcript nonce
-    //TODO - check if the signature is sent with the message
+                               const char *b64_authenticate_server_response) {
+    const char *ikey[] = {"transactionId", "authenticateServerResponse", NULL};
+    const char *idata[] = {transaction_id, b64_authenticate_server_response, NULL};
     const char *okey[] = {"profileMetadata", "smdpSigned2", "smdpSignature2", "smdpCertificate", NULL};
     const char oobj[] = {0, 0, 0, 0};
-
     void **optr[] = {(void **)&resp->b64_profileMetadata, (void **)&resp->b64_smdpSigned2,
                      (void **)&resp->b64_smdpSignature2, (void **)&resp->b64_smdpCertificate, NULL};
 
@@ -518,22 +468,9 @@ int es9p_authenticate_client(struct euicc_ctx *ctx) {
         return -1;
     }
 
-
-    //* Updated to match the values added the ctx for the authenticate client eligibility bundle
-    //* Don't need to be freed - persisted as a stored state
-    fret = es9p_authenticate_client_r(ctx, 
-                                      ctx->http._internal.prepare_download_param, 
-                                      ctx->http.server_address,
+    fret = es9p_authenticate_client_r(ctx, ctx->http._internal.prepare_download_param, ctx->http.server_address,
                                       ctx->http._internal.transaction_id_http,
-                                      ctx->http._internal.b64_authenticate_server_response, 
-                                      ctx->http._internal.b64_pseudonym_cert, 
-                                      ctx->http._internal.b64_auth_cred, 
-                                      ctx->http._internal.b64_one_time_tok, 
-                                      ctx->http._internal.b64_hashed_pseudonym, 
-                                      ctx->http._internal.b64_inclusion_proof, 
-                                      ctx->http._internal.b64_accum_root, 
-                                      ctx->http._internal.mno_root_sig, 
-                                      ctx->http._internal.session_binding);
+                                      ctx->http._internal.b64_authenticate_server_response);
     if (fret < 0) {
         free(ctx->http._internal.prepare_download_param);
         ctx->http._internal.prepare_download_param = NULL;

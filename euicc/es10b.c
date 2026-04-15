@@ -10,6 +10,7 @@
 #include <string.h>
 #include <unistd.h>
 
+// TODO - update to fit zk-esim if necessary
 int es10b_prepare_download_r(struct euicc_ctx *ctx, char **b64_PrepareDownloadResponse,
                              struct es10b_prepare_download_param *param,
                              struct es10b_prepare_download_param_user *param_user) {
@@ -758,6 +759,7 @@ exit:
     return fret;
 }
 
+//* Updated to free new parameters 
 void es10b_prepare_download_param_free(struct es10b_prepare_download_param *param) {
     if (!param) {
         return;
@@ -767,6 +769,8 @@ void es10b_prepare_download_param_free(struct es10b_prepare_download_param *para
     free(param->b64_smdpCertificate);
     free(param->b64_smdpSignature2);
     free(param->b64_smdpSigned2);
+    free(param->b64_transcriptNonce);       //? Refers to the I_t transcript nonce in zk-esim
+    free(param->b64_smdpNonce);             //? Refers to N_S server nonce in zk-esim
 
     memset(param, 0x00, sizeof(*param));
 }

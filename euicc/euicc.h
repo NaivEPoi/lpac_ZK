@@ -46,6 +46,15 @@ struct euicc_ctx {
             char *b64_prepare_download_response;
             char *b64_bound_profile_package;
             char *b64_cancel_session_response;
+            //* Added values for the updated authenticate client function - values for the eligibility bundle 
+            char *b64_pseudonym_cert;       //? PCert_U
+            char *b64_auth_cred;            //? sigma_cred
+            char *b64_one_time_tok;         //? T_i
+            char *b64_hashed_pseudonym;     //? Hpid
+            char *b64_inclusion_proof;      //? π_inc
+            char *b64_accum_root;           //? root_auth
+            char *mno_root_sig;             //? sigma^root_MNO
+            char *session_binding;          //? Sig_sk(I_t, N_S, N_U, T_i, Hpid, PCert_U, sid)
         } _internal;
         FILE *log_fp;
     } http;

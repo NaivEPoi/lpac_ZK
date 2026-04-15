@@ -64,11 +64,14 @@ struct es10b_load_bound_profile_package_result {
     enum es10b_error_reason errorReason;
 };
 
+//* Added the transcript and smdp nonce parameters
 struct es10b_prepare_download_param {
     char *b64_profileMetadata;
     char *b64_smdpSigned2;
     char *b64_smdpSignature2;
     char *b64_smdpCertificate;
+    char *b64_transcriptNonce;      //? Refers to the I_t transcript nonce in zk-esim
+    char *b64_smdpNonce;            //? Refers to N_S server nonce in zk-esim
 };
 
 struct es10b_prepare_download_param_user {
@@ -89,11 +92,14 @@ struct es10b_pending_notification {
     char *b64_PendingNotification;
 };
 
+//* Updated to fit zk-esim
 struct es10b_authenticate_server_param {
     char *b64_serverSigned1;
     char *b64_serverSignature1;
     char *b64_euiccCiPKIdToBeUsed;
     char *b64_serverCertificate;
+    char *b64_transcriptNonce;              //? Added for the transcript nonce defined as T_i
+    char *b64_smdpNonce;                    //? Added for the server nonce defined as N_s
 };
 
 struct es10b_authenticate_server_param_user {

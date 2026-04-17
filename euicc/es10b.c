@@ -769,8 +769,6 @@ void es10b_prepare_download_param_free(struct es10b_prepare_download_param *para
     free(param->b64_smdpCertificate);
     free(param->b64_smdpSignature2);
     free(param->b64_smdpSigned2);
-    free(param->b64_transcriptNonce);       //? Refers to the I_t transcript nonce in zk-esim
-    free(param->b64_smdpNonce);             //? Refers to N_S server nonce in zk-esim
 
     memset(param, 0x00, sizeof(*param));
 }

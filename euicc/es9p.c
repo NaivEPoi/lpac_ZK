@@ -251,21 +251,61 @@ exit:
     return fret;
 }
 
+
 int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
                                    struct es10b_authenticate_server_param *resp, const char *server_address,
                                    const char *b64_euicc_challenge, const char *b64_euicc_info_1) {
 
     const char *ikey[] = {"smdpAddress", "euiccChallenge", "euiccInfo1", NULL};
     const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
-    const char *okey[] = {"transactionId",       "serverSigned1",     "serverSignature1",
-                          "euiccCiPKIdToBeUsed", "serverCertificate", NULL};
 
-    const char oobj[] = {0, 0, 0, 0, 0};
+    const char *okey[] = {"transactionId",
+                        "serverSigned1", 
+                        "serverSignature1",
+                        "euiccCiPKIdToBeUsed", 
+                        "serverCertificate", 
+                        NULL};
+
+    const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
+
     void **optr[] = {(void **)transaction_id,
                      (void **)&resp->b64_serverSigned1,
                      (void **)&resp->b64_serverSignature1,
                      (void **)&resp->b64_euiccCiPKIdToBeUsed,
                      (void **)&resp->b64_serverCertificate,
+                     NULL};
+
+    if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/initiateAuthentication", ikey, idata, okey, oobj, optr)) {
+        return -1;
+    }
+
+    es9p_base64_trim(resp->b64_serverSigned1);
+    es9p_base64_trim(resp->b64_serverSignature1);
+    es9p_base64_trim(resp->b64_euiccCiPKIdToBeUsed);
+    es9p_base64_trim(resp->b64_serverCertificate);
+
+    return 0;
+}
+
+int es9p_initiate_authentication_rzk(struct euicc_ctx *ctx, char **transaction_id,
+                                   struct es10b_authenticate_server_param *resp, const char *server_address,
+                                   const char *b64_euicc_challenge, const char *b64_euicc_info_1) {
+
+    const char *ikey[] = {"smdpAddress", "euiccChallenge", "euiccInfo1", NULL};
+    const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
+
+    const char *okey[] = {"transactionId",       "serverSigned1",     "serverSignature1",
+                          "euiccCiPKIdToBeUsed", "serverCertificate", "transcriptNonce", 
+                          "serverNonce", NULL};
+
+    const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
+    void **optr[] = {(void **)transaction_id,
+                     (void **)&resp->b64_serverSigned1,
+                     (void **)&resp->b64_serverSignature1,
+                     (void **)&resp->b64_euiccCiPKIdToBeUsed,
+                     (void **)&resp->b64_serverCertificate,
+                     (void **)&resp->b64_transcript_nonce,
+                     (void **)&resp->b64_server_nonce,
                      NULL};
 
     if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/initiateAuthentication", ikey, idata, okey, oobj,
@@ -280,42 +320,6 @@ int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
 
     return 0;
 }
-
-// int es9p_initiate_authentication_rzk(struct euicc_ctx *ctx, char **transaction_id,
-//                                    struct es10b_authenticate_server_param *resp, const char *server_address,
-//                                    const char *b64_euicc_challenge, const char *b64_euicc_info_1) {
-
-//     //* Added transaction Id to troubleshoot problem with sm-dp authenticate client
-//     const char *ikey[] = {"smdpAddress", "euiccChallenge", "euiccInfo1", NULL};
-//     const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
-
-//     const char *okey[] = {"transactionId",
-//                         "serverSigned1", 
-//                         "serverSignature1",
-//                         "euiccCiPKIdToBeUsed", 
-//                         "serverCertificate", 
-//                         NULL};
-
-//     const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
-
-//     void **optr[] = {(void **)transaction_id,
-//                      (void **)&resp->b64_serverSigned1,
-//                      (void **)&resp->b64_serverSignature1,
-//                      (void **)&resp->b64_euiccCiPKIdToBeUsed,
-//                      (void **)&resp->b64_serverCertificate,
-//                      NULL};
-
-//     if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/initiateAuthentication", ikey, idata, okey, oobj, optr)) {
-//         return -1;
-//     }
-
-//     es9p_base64_trim(resp->b64_serverSigned1);
-//     es9p_base64_trim(resp->b64_serverSignature1);
-//     es9p_base64_trim(resp->b64_euiccCiPKIdToBeUsed);
-//     es9p_base64_trim(resp->b64_serverCertificate);
-
-//     return 0;
-// }
 
 int es9p_get_bound_profile_package_r(struct euicc_ctx *ctx, char **b64_bound_profile_package,
                                      const char *server_address, const char *transaction_id,
@@ -379,10 +383,10 @@ int es9p_authenticate_client_rzk(struct euicc_ctx *ctx, struct es10b_prepare_dow
                             NULL};
 
     const char *idata[] = {transaction_id, b64_authenticate_server_response,
-                            zk->pseudonym_cert, zk->auth_cred,
-                            zk->one_time_tok, zk->hashed_pseudonym,
-                            zk->inclusion_proof, zk->accum_root,
-                            zk->mno_root_sig, zk->session_binding,
+                            zk->b64_pseudonym_cert, zk->b64_auth_cred,
+                            zk->b64_one_time_tok, zk->b64_hashed_pseudonym,
+                            zk->b64_inclusion_proof, zk->b64_accum_root,
+                            zk->b64_mno_root_sig, zk->b64_session_binding,
                             NULL};
 
     const char *okey[] = {"profileMetadata", "smdpSigned2", "smdpSignature2", "smdpCertificate", NULL};
@@ -500,7 +504,7 @@ int es9p_initiate_authentication(struct euicc_ctx *ctx) {
 
     ctx->http._internal.zk_auth = malloc(sizeof(struct zk_eligibility_bundle));
 
-    fret = es9p_initiate_authentication_r(
+    fret = es9p_initiate_authentication_rzk(
         ctx, &ctx->http._internal.transaction_id_http, ctx->http._internal.authenticate_server_param,
         ctx->http.server_address, ctx->http._internal.b64_euicc_challenge, ctx->http._internal.b64_euicc_info_1);
     if (fret < 0) {
@@ -517,6 +521,12 @@ int es9p_initiate_authentication(struct euicc_ctx *ctx) {
 
     free(ctx->http._internal.zk_auth);
     ctx->http._internal.zk_auth = NULL;
+
+    free(ctx->http._internal.b64_transcript_nonce);
+    ctx->http._internal.b64_server_nonce = NULL;
+
+    free(ctx->http._internal.b64_server_nonce);
+    ctx->http._internal.b64_server_nonce;
 
     return fret;
 }

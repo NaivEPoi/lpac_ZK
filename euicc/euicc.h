@@ -48,6 +48,8 @@ struct euicc_ctx {
             char *b64_cancel_session_response;
             //* contains the zk-esim elibility bundle
             struct zk_eligibility_bundle *zk_auth;
+            char *b64_transcript_nonce;
+            char *b64_server_nonce;
         } _internal;
         FILE *log_fp;
     } http;

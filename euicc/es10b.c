@@ -759,7 +759,6 @@ exit:
     return fret;
 }
 
-//* Updated to free new parameters 
 void es10b_prepare_download_param_free(struct es10b_prepare_download_param *param) {
     if (!param) {
         return;
@@ -782,6 +781,8 @@ void es10b_authenticate_server_param_free(struct es10b_authenticate_server_param
     free(param->b64_serverCertificate);
     free(param->b64_serverSignature1);
     free(param->b64_serverSigned1);
+    free(param->b64_transcript_nonce);
+    free(param->b64_server_nonce);
 
     memset(param, 0x00, sizeof(*param));
 }

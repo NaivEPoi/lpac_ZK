@@ -8,14 +8,16 @@
 
 //* Added values for the updated authenticate client function - values for the eligibility bundle 
 struct zk_eligibility_bundle {
-    char *pseudonym_cert;
-    char *auth_cred;
-    char *one_time_tok;
-    char *hashed_pseudonym;
-    char *inclusion_proof;
-    char *accum_root;
-    char *mno_root_sig;
-    char *session_binding;
+    char *b64_transcript_nonce;
+    char *b64_server_nonce;
+    char *b64_pseudonym_cert;
+    char *b64_auth_cred;
+    char *b64_one_time_tok;
+    char *b64_hashed_pseudonym;
+    char *b64_inclusion_proof;
+    char *b64_accum_root;
+    char *b64_mno_root_sig;
+    char *b64_session_binding;
 };
 
 

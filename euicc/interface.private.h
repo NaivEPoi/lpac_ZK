@@ -8,6 +8,7 @@
 enum apdu_sw1 {
     SW1_OK = 0x90,
     SW1_LAST = 0x61,
+    SW1_LAST_PROP = 0x91, // proprietary "more data pending" (zkesim applet)
 };
 
 struct apdu_request {

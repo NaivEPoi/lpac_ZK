@@ -33,7 +33,7 @@ static int es10x_transmit_iter(struct euicc_ctx *ctx, struct apdu_request *req, 
 
         euicc_apdu_response_free(&response);
 
-        if (response.sw1 == SW1_LAST) {
+        if (response.sw1 == SW1_LAST || response.sw1 == SW1_LAST_PROP) {
             int ret;
 
             if ((ret = euicc_apdu_le(ctx, &request, APDU_CONTINUE_READ_HEADER, response.sw2)) < 0) {

@@ -10,7 +10,6 @@
 #include <string.h>
 #include <unistd.h>
 
-// TODO - update to fit zk-esim if necessary
 int es10b_prepare_download_r(struct euicc_ctx *ctx, char **b64_PrepareDownloadResponse,
                              struct es10b_prepare_download_param *param,
                              struct es10b_prepare_download_param_user *param_user) {
@@ -514,9 +513,13 @@ int es10b_authenticate_server_r(struct euicc_ctx *ctx, uint8_t **transaction_id,
 
     uint8_t imei[8];
     uint8_t *serverSigned1 = NULL, *serverSignature1 = NULL, *euiccCiPKIdToBeUsed = NULL, *serverCertificate = NULL;
+
     int serverSigned1_len, serverSignature1_len, euiccCiPKIdToBeUsed_len, serverCertificate_len;
+
+    //* Updated to include the transcript and server nonces
     struct euicc_derutil_node n_request, n_serverSigned1, n_transactionId, n_serverSignature1, n_euiccCiPKIdToBeUsed,
-        n_serverCertificate, n_CtxParams1, n_matchingId, n_deviceInfo, n_tac, n_deviceCapabilities, n_imei;
+        n_serverCertificate, n_CtxParams1, n_matchingId, n_deviceInfo, n_tac, n_deviceCapabilities, n_imei,
+        n_transcriptNonce, n_serverNonce;
 
     *transaction_id = NULL;
     *transaction_id_len = 0;
@@ -533,6 +536,10 @@ int es10b_authenticate_server_r(struct euicc_ctx *ctx, uint8_t **transaction_id,
     memset(&n_tac, 0, sizeof(n_tac));
     memset(&n_deviceCapabilities, 0, sizeof(n_deviceCapabilities));
     memset(&n_imei, 0, sizeof(n_imei));
+    //* Added for the transcript and server nonces
+    memset(&n_transcriptNonce, 0, sizeof(n_transcriptNonce));
+    memset(&n_serverNonce, 0, sizeof(n_serverNonce));
+
 
     serverSigned1 = malloc(euicc_base64_decode_len(param->b64_serverSigned1));
     if (!serverSigned1) {
@@ -570,6 +577,7 @@ int es10b_authenticate_server_r(struct euicc_ctx *ctx, uint8_t **transaction_id,
         goto err;
     }
 
+
     if (euicc_derutil_unpack_find_tag(&n_serverSigned1, 0x30, serverSigned1, serverSigned1_len) < 0) {
         goto err;
     }
@@ -587,6 +595,15 @@ int es10b_authenticate_server_r(struct euicc_ctx *ctx, uint8_t **transaction_id,
     }
 
     if (euicc_derutil_unpack_find_tag(&n_serverCertificate, 0x30, serverCertificate, serverCertificate_len) < 0) {
+        goto err;
+    }
+
+    //* Added for the transcript and server nonces
+    if(euicc_derutil_unpack_find_tag(&n_transcriptNonce, 0x85, n_serverSigned1.value, n_serverSigned1.length) < 0) {
+        goto err;
+    }
+
+    if(euicc_derutil_unpack_find_tag(&n_serverNonce, 0x86, n_serverSigned1.value, n_serverSigned1.length) < 0) {
         goto err;
     }
 
@@ -781,8 +798,8 @@ void es10b_authenticate_server_param_free(struct es10b_authenticate_server_param
     free(param->b64_serverCertificate);
     free(param->b64_serverSignature1);
     free(param->b64_serverSigned1);
-    free(param->b64_transcript_nonce);
-    free(param->b64_server_nonce);
+    // free(param->b64_transcript_nonce);
+    // free(param->b64_server_nonce);
 
     memset(param, 0x00, sizeof(*param));
 }

@@ -123,6 +123,11 @@ static int es9p_trans_json(struct euicc_ctx *ctx, const char *smdp, const char *
         strncpy(ctx->http.status.message, "HTTP transport failed", sizeof(ctx->http.status.message));
         goto err;
     }
+
+    //? remove after testing
+    printf("HTTP response:\n%s\n", rbuf);
+    printf("HTTP status: %d\n", rcode);
+
     cJSON_free(sbuf);
     sbuf = NULL;
 
@@ -266,7 +271,7 @@ int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
                         "serverCertificate", 
                         NULL};
 
-    const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
+    const char oobj[] = {0, 0, 0, 0, 0};
 
     void **optr[] = {(void **)transaction_id,
                      (void **)&resp->b64_serverSigned1,
@@ -295,17 +300,14 @@ int es9p_initiate_authentication_rzk(struct euicc_ctx *ctx, char **transaction_i
     const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
 
     const char *okey[] = {"transactionId",       "serverSigned1",     "serverSignature1",
-                          "euiccCiPKIdToBeUsed", "serverCertificate", "transcriptNonce", 
-                          "serverNonce", NULL};
+                          "euiccCiPKIdToBeUsed", "serverCertificate", NULL};
 
-    const char oobj[] = {0, 0, 0, 0, 0, 0, 0};
+    const char oobj[] = {0, 0, 0, 0};
     void **optr[] = {(void **)transaction_id,
                      (void **)&resp->b64_serverSigned1,
                      (void **)&resp->b64_serverSignature1,
                      (void **)&resp->b64_euiccCiPKIdToBeUsed,
                      (void **)&resp->b64_serverCertificate,
-                     (void **)&resp->b64_transcript_nonce,
-                     (void **)&resp->b64_server_nonce,
                      NULL};
 
     if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/initiateAuthentication", ikey, idata, okey, oobj,
@@ -352,66 +354,73 @@ int es9p_authenticate_client_r(struct euicc_ctx *ctx, struct es10b_prepare_downl
     const char oobj[] = {0, 0, 0, 0};
     void **optr[] = {(void **)&resp->b64_profileMetadata, (void **)&resp->b64_smdpSigned2,
                      (void **)&resp->b64_smdpSignature2, (void **)&resp->b64_smdpCertificate, NULL};
-
-    if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/authenticateClient", ikey, idata, okey, oobj, optr)) {
-        return -1;
-    }
-
-    es9p_base64_trim(resp->b64_profileMetadata);
-    es9p_base64_trim(resp->b64_smdpSigned2);
-    es9p_base64_trim(resp->b64_smdpSignature2);
-    es9p_base64_trim(resp->b64_smdpCertificate);
-
-    return 0;
-}
-
-int es9p_authenticate_client_rzk(struct euicc_ctx *ctx, struct es10b_prepare_download_param *resp, 
-                                const char *server_address, const char *transaction_id, 
-                                const char *b64_authenticate_server_response) {
     
-    if (!ctx->http._internal.zk_auth) {
-        return -1;
-    }
-
-    struct zk_eligibility_bundle *zk = ctx->http._internal.zk_auth;
-
-    const char *ikey[] = {"transactionId", "authenticateServerResponse",
-                            "pseudonymCert","authCredential",
-                            "oneTimeToken", "hashedPseudonym",
-                            "inclusionProof","accumulatorRoot",
-                            "mnoRootSignature","sessionBinding",
-                            NULL};
-
-    const char *idata[] = {transaction_id, b64_authenticate_server_response,
-                            zk->b64_pseudonym_cert, zk->b64_auth_cred,
-                            zk->b64_one_time_tok, zk->b64_hashed_pseudonym,
-                            zk->b64_inclusion_proof, zk->b64_accum_root,
-                            zk->b64_mno_root_sig, zk->b64_session_binding,
-                            NULL};
-
-    const char *okey[] = {"profileMetadata", "smdpSigned2", "smdpSignature2", "smdpCertificate", NULL};
-
-    const char oobj[] = {0, 0, 0, 0};
-
-    void **optr[] = {
-        (void **)&resp->b64_profileMetadata,
-        (void **)&resp->b64_smdpSigned2,
-        (void **)&resp->b64_smdpSignature2,
-        (void **)&resp->b64_smdpCertificate,
-        NULL
-    };
-
+    //! code currently fails here 
     if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/authenticateClient", ikey, idata, okey, oobj, optr)) {
+        printf("Failed to convert to json");
         return -1;
     }
+
+    printf("converted to json \n");
 
     es9p_base64_trim(resp->b64_profileMetadata);
     es9p_base64_trim(resp->b64_smdpSigned2);
     es9p_base64_trim(resp->b64_smdpSignature2);
     es9p_base64_trim(resp->b64_smdpCertificate);
 
+    printf("trimmed base 64 values and added to response");
+
     return 0;
 }
+
+// int es9p_authenticate_client_rzk(struct euicc_ctx *ctx, struct es10b_prepare_download_param *resp, 
+//                                 const char *server_address, const char *transaction_id, 
+//                                 const char *b64_authenticate_server_response) {
+    
+//     if (!ctx->http._internal.zk_auth) {
+//         printf("\nNo zk_auth in http._internal \n");
+//         return -1;
+//     }
+
+//     struct zk_eligibility_bundle *zk = ctx->http._internal.zk_auth;
+
+//     const char *ikey[] = {"transactionId", "authenticateServerResponse",
+//                             "pseudonymCert","authCredential",
+//                             "oneTimeToken", "hashedPseudonym",
+//                             "inclusionProof","accumulatorRoot",
+//                             "mnoRootSignature","sessionBinding",
+//                             NULL};
+    
+//     const char *idata[] = {transaction_id, b64_authenticate_server_response,
+//                             zk->b64_pseudonym_cert, zk->b64_auth_cred,
+//                             zk->b64_one_time_tok, zk->b64_hashed_pseudonym,
+//                             zk->b64_inclusion_proof, zk->b64_accum_root,
+//                             zk->b64_mno_root_sig, zk->b64_session_binding,
+//                             NULL};
+
+//     const char *okey[] = {"profileMetadata", "smdpSigned2", "smdpSignature2", "smdpCertificate", NULL};
+
+//     const char oobj[] = {0, 0, 0, 0};
+
+//     void **optr[] = {
+//         (void **)&resp->b64_profileMetadata,
+//         (void **)&resp->b64_smdpSigned2,
+//         (void **)&resp->b64_smdpSignature2,
+//         (void **)&resp->b64_smdpCertificate,
+//         NULL
+//     };
+
+//     if (es9p_trans_json(ctx, server_address, "/gsma/rsp2/es9plus/authenticateClient", ikey, idata, okey, oobj, optr)) {
+//         return -1;
+//     }
+
+//     es9p_base64_trim(resp->b64_profileMetadata);
+//     es9p_base64_trim(resp->b64_smdpSigned2);
+//     es9p_base64_trim(resp->b64_smdpSignature2);
+//     es9p_base64_trim(resp->b64_smdpCertificate);
+
+//     return 0;
+// }
 
 int es9p_cancel_session_r(struct euicc_ctx *ctx, const char *server_address, const char *transaction_id,
                           const char *b64_cancel_session_response) {
@@ -519,15 +528,6 @@ int es9p_initiate_authentication(struct euicc_ctx *ctx) {
     free(ctx->http._internal.b64_euicc_info_1);
     ctx->http._internal.b64_euicc_info_1 = NULL;
 
-    free(ctx->http._internal.zk_auth);
-    ctx->http._internal.zk_auth = NULL;
-
-    free(ctx->http._internal.b64_transcript_nonce);
-    ctx->http._internal.b64_server_nonce = NULL;
-
-    free(ctx->http._internal.b64_server_nonce);
-    ctx->http._internal.b64_server_nonce;
-
     return fret;
 }
 
@@ -561,10 +561,12 @@ int es9p_authenticate_client(struct euicc_ctx *ctx) {
     int fret;
 
     if (ctx->http._internal.prepare_download_param) {
+        printf("prepare download param doesn't exist \n");
         return -1;
     }
 
     if (ctx->http._internal.b64_authenticate_server_response == NULL) {
+        printf("authenticate server response doesn't exist \n");
         return -1;
     }
 
@@ -573,21 +575,12 @@ int es9p_authenticate_client(struct euicc_ctx *ctx) {
         return -1;
     }
 
-
-    //* Updated to match the values added the ctx for the authenticate client eligibility bundle
-    //* Don't need to be freed - persisted as a stored state
-    // fret = es9p_authenticate_client_r(ctx, 
-    //                                   ctx->http._internal.prepare_download_param, 
-    //                                   ctx->http.server_address,
-    //                                   ctx->http._internal.transaction_id_http,
-    //                                   ctx->http._internal.b64_authenticate_server_response);
-
-    fret = es9p_authenticate_client_rzk(ctx,
+    fret = es9p_authenticate_client_r(ctx,
                                         ctx->http._internal.prepare_download_param,
                                         ctx->http.server_address,
                                         ctx->http._internal.transaction_id_http,
                                         ctx->http._internal.b64_authenticate_server_response);
-
+    
     if (fret < 0) {
         free(ctx->http._internal.prepare_download_param);
         ctx->http._internal.prepare_download_param = NULL;

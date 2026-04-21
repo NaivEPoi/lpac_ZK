@@ -92,8 +92,8 @@ struct es10b_authenticate_server_param {
     char *b64_serverSignature1;
     char *b64_euiccCiPKIdToBeUsed;
     char *b64_serverCertificate;
-    char *b64_transcript_nonce;
-    char *b64_server_nonce;
+    // char *b64_transcript_nonce;
+    // char *b64_server_nonce;
 };
 
 struct es10b_authenticate_server_param_user {

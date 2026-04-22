@@ -324,6 +324,7 @@ exit:
 }
 
 int es10c_get_eid(struct euicc_ctx *ctx, char **eidValue) {
+    printf("\n doing es10c_get_eid \n");
     int fret = 0;
     struct euicc_derutil_node n_request = {
         .tag = 0xBF3E, // GetEuiccDataRequest
@@ -351,6 +352,7 @@ int es10c_get_eid(struct euicc_ctx *ctx, char **eidValue) {
     if (es10x_command(ctx, &respbuf, &resplen, ctx->apdu._internal.request_buffer.body, reqlen) < 0) {
         goto err;
     }
+    printf("\n respbuf = %s \n", respbuf);
 
     if (euicc_derutil_unpack_find_tag(&tmpnode, n_request.tag, respbuf, resplen)) {
         goto err;

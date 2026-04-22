@@ -91,112 +91,112 @@ static int encode_der_node_to_base64(char **out, struct euicc_derutil_node *node
     return 0;
 }
 
-static int placeholder_initiate_auth(struct euicc_ctx *ctx) {
-    static const uint8_t dummy_txid[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    static const uint8_t server_address[] = {'s', 'm', 'd', 'p', '.', 't', 'e', 's', 't', '.', 'c', 'o', 'm'};
-    static const uint8_t server_challenge[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    static const uint8_t server_signature[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    static const uint8_t euicc_ci_pk_id[] = {0x00, 0x00, 0x00, 0x00};
-    char *challenge = NULL;
-    int challenge_len;
-    struct es10b_authenticate_server_param *param = NULL;
-    struct euicc_derutil_node n_server_signed1 = {0};
-    struct euicc_derutil_node n_transaction_id = {0};
-    struct euicc_derutil_node n_euicc_challenge = {0};
-    struct euicc_derutil_node n_server_address = {0};
-    struct euicc_derutil_node n_server_challenge = {0};
-    struct euicc_derutil_node n_server_signature = {0};
-    struct euicc_derutil_node n_euicc_ci_pk_id = {0};
-    struct euicc_derutil_node n_server_certificate = {0};
+// static int zk_initiate_auth(struct euicc_ctx *ctx, bool is_simulated) {
+//     static const uint8_t dummy_txid[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+//     static const uint8_t server_address[] = {'s', 'm', 'd', 'p', '.', 't', 'e', 's', 't', '.', 'c', 'o', 'm'};
+//     static const uint8_t server_challenge[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//                                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+//     static const uint8_t server_signature[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+//     static const uint8_t euicc_ci_pk_id[] = {0x00, 0x00, 0x00, 0x00};
+//     char *challenge = NULL;
+//     int challenge_len;
+//     struct es10b_authenticate_server_param *param = NULL;
+//     struct euicc_derutil_node n_server_signed1 = {0};
+//     struct euicc_derutil_node n_transaction_id = {0};
+//     struct euicc_derutil_node n_euicc_challenge = {0};
+//     struct euicc_derutil_node n_server_address = {0};
+//     struct euicc_derutil_node n_server_challenge = {0};
+//     struct euicc_derutil_node n_server_signature = {0};
+//     struct euicc_derutil_node n_euicc_ci_pk_id = {0};
+//     struct euicc_derutil_node n_server_certificate = {0};
 
-    if (ctx->http._internal.b64_euicc_challenge == NULL) {
-        return -1;
-    }
+//     if (ctx->http._internal.b64_euicc_challenge == NULL) {
+//         return -1;
+//     }
 
-    param = calloc(1, sizeof(*param));
-    if (param == NULL) {
-        return -1;
-    }
+//     param = calloc(1, sizeof(*param));
+//     if (param == NULL) {
+//         return -1;
+//     }
 
-    challenge_len = euicc_base64_decode_len(ctx->http._internal.b64_euicc_challenge);
-    if (challenge_len <= 0) {
-        goto err;
-    }
+//     challenge_len = euicc_base64_decode_len(ctx->http._internal.b64_euicc_challenge);
+//     if (challenge_len <= 0) {
+//         goto err;
+//     }
 
-    challenge = malloc((size_t)challenge_len);
-    if (challenge == NULL) {
-        goto err;
-    }
+//     challenge = malloc((size_t)challenge_len);
+//     if (challenge == NULL) {
+//         goto err;
+//     }
 
-    if (euicc_base64_decode((unsigned char *)challenge, ctx->http._internal.b64_euicc_challenge) < 0) {
-        goto err;
-    }
+//     if (euicc_base64_decode((unsigned char *)challenge, ctx->http._internal.b64_euicc_challenge) < 0) {
+//         goto err;
+//     }
 
-    n_server_signed1.tag = 0x30;
-    n_server_signed1.pack.child = &n_transaction_id;
+//     n_server_signed1.tag = 0x30;
+//     n_server_signed1.pack.child = &n_transaction_id;
 
-    n_transaction_id.tag = 0x80;
-    n_transaction_id.value = dummy_txid;
-    n_transaction_id.length = (uint32_t)sizeof(dummy_txid);
-    n_transaction_id.pack.next = &n_euicc_challenge;
+//     n_transaction_id.tag = 0x80;
+//     n_transaction_id.value = dummy_txid;
+//     n_transaction_id.length = (uint32_t)sizeof(dummy_txid);
+//     n_transaction_id.pack.next = &n_euicc_challenge;
 
-    n_euicc_challenge.tag = 0x81;
-    n_euicc_challenge.value = (const uint8_t *)challenge;
-    n_euicc_challenge.length = 16;
-    n_euicc_challenge.pack.next = &n_server_address;
+//     n_euicc_challenge.tag = 0x81;
+//     n_euicc_challenge.value = (const uint8_t *)challenge;
+//     n_euicc_challenge.length = 16;
+//     n_euicc_challenge.pack.next = &n_server_address;
 
-    n_server_address.tag = 0x83;
-    n_server_address.value = server_address;
-    n_server_address.length = (uint32_t)sizeof(server_address);
-    n_server_address.pack.next = &n_server_challenge;
+//     n_server_address.tag = 0x83;
+//     n_server_address.value = server_address;
+//     n_server_address.length = (uint32_t)sizeof(server_address);
+//     n_server_address.pack.next = &n_server_challenge;
 
-    n_server_challenge.tag = 0x84;
-    n_server_challenge.value = server_challenge;
-    n_server_challenge.length = (uint32_t)sizeof(server_challenge);
-    n_server_challenge.pack.next = &n_server_signature;
+//     n_server_challenge.tag = 0x84;
+//     n_server_challenge.value = server_challenge;
+//     n_server_challenge.length = (uint32_t)sizeof(server_challenge);
+//     n_server_challenge.pack.next = &n_server_signature;
 
-    n_server_signature.tag = 0x5F37;
-    n_server_signature.value = server_signature;
-    n_server_signature.length = (uint32_t)sizeof(server_signature);
-    n_server_signature.pack.next = &n_euicc_ci_pk_id;
+//     n_server_signature.tag = 0x5F37;
+//     n_server_signature.value = server_signature;
+//     n_server_signature.length = (uint32_t)sizeof(server_signature);
+//     n_server_signature.pack.next = &n_euicc_ci_pk_id;
 
-    n_euicc_ci_pk_id.tag = 0x04;
-    n_euicc_ci_pk_id.value = euicc_ci_pk_id;
-    n_euicc_ci_pk_id.length = (uint32_t)sizeof(euicc_ci_pk_id);
-    n_euicc_ci_pk_id.pack.next = &n_server_certificate;
+//     n_euicc_ci_pk_id.tag = 0x04;
+//     n_euicc_ci_pk_id.value = euicc_ci_pk_id;
+//     n_euicc_ci_pk_id.length = (uint32_t)sizeof(euicc_ci_pk_id);
+//     n_euicc_ci_pk_id.pack.next = &n_server_certificate;
 
-    n_server_certificate.tag = 0x30;
+//     n_server_certificate.tag = 0x30;
 
-    if (encode_der_node_to_base64(&param->b64_serverSigned1, &n_server_signed1) < 0) {
-        goto err;
-    }
+//     if (encode_der_node_to_base64(&param->b64_serverSigned1, &n_server_signed1) < 0) {
+//         goto err;
+//     }
 
-    n_server_signature.pack.next = NULL;
-    if (encode_der_node_to_base64(&param->b64_serverSignature1, &n_server_signature) < 0) {
-        goto err;
-    }
+//     n_server_signature.pack.next = NULL;
+//     if (encode_der_node_to_base64(&param->b64_serverSignature1, &n_server_signature) < 0) {
+//         goto err;
+//     }
 
-    if (encode_der_node_to_base64(&param->b64_euiccCiPKIdToBeUsed, &n_euicc_ci_pk_id) < 0) {
-        goto err;
-    }
+//     if (encode_der_node_to_base64(&param->b64_euiccCiPKIdToBeUsed, &n_euicc_ci_pk_id) < 0) {
+//         goto err;
+//     }
 
-    if (encode_der_node_to_base64(&param->b64_serverCertificate, &n_server_certificate) < 0) {
-        goto err;
-    }
+//     if (encode_der_node_to_base64(&param->b64_serverCertificate, &n_server_certificate) < 0) {
+//         goto err;
+//     }
 
-    ctx->http._internal.authenticate_server_param = param;
-    free(challenge);
-    return 0;
+//     ctx->http._internal.authenticate_server_param = param;
+//     free(challenge);
+//     return 0;
 
-err:
-    free(challenge);
-    es10b_authenticate_server_param_free(param);
-    free(param);
-    return -1;
-}
+// err:
+//     free(challenge);
+//     es10b_authenticate_server_param_free(param);
+//     free(param);
+//     return -1;
+// }
 
-static int placeholder_authenticate_client(struct euicc_ctx *ctx) {
+static int zk_authenticate_client(struct euicc_ctx *ctx) {
     static const uint8_t smdp_signature[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     struct es10b_prepare_download_param *param = NULL;
     struct euicc_derutil_node n_smdp_signed2 = {0};
@@ -522,7 +522,8 @@ static int applet_main(int argc, char **argv) {
     CANCELPOINT();
     if (is_simulated) {
         jprint_progress("es10b_get_euicc_challenge_r", smdp);
-        if (es10b_get_euicc_challenge_r(&euicc_ctx, &euicc_ctx.http._internal.b64_euicc_challenge)) {
+        if (es10b_get_euicc_challenge_and_info(&euicc_ctx)) {
+        // if (es10b_get_euicc_challenge_r(&euicc_ctx, &euicc_ctx.http._internal.b64_euicc_challenge)) {
             error_function_name = "es10b_get_euicc_challenge_r";
             error_detail = NULL;
             goto err;
@@ -537,21 +538,21 @@ static int applet_main(int argc, char **argv) {
     }
 
     CANCELPOINT();
-    if (is_simulated) {
-        jprint_progress("placeholder_initiate_auth", smdp);
-        if (placeholder_initiate_auth(&euicc_ctx)) {
-            error_function_name = "placeholder_initiate_auth";
-            error_detail = NULL;
-            goto err;
-        }
-    } else {
-        jprint_progress("es9p_initiate_authentication", smdp);
-        if (es9p_initiate_authentication(&euicc_ctx)) {
-            error_function_name = "es9p_initiate_authentication";
-            error_detail = strdup(euicc_ctx.http.status.message);
-            goto err;
-        }
+    // if (is_simulated) {
+    jprint_progress("es9p_initiate_authentication", smdp);
+    if (es9p_initiate_authentication(&euicc_ctx)) {
+        error_function_name = "es9p_initiate_authentication";
+        error_detail = NULL;
+        goto err;
     }
+    // } else {
+    //     jprint_progress("es9p_initiate_authentication", smdp);
+    //     if (es9p_initiate_authentication(&euicc_ctx)) {
+    //         error_function_name = "es9p_initiate_authentication";
+    //         error_detail = strdup(euicc_ctx.http.status.message);
+    //         goto err;
+    //     }
+    // }
 
     CANCELPOINT();
     jprint_progress("es10b_authenticate_server", smdp);
@@ -564,7 +565,7 @@ static int applet_main(int argc, char **argv) {
     CANCELPOINT();
     if (is_simulated) {
         jprint_progress("placeholder_authenticate_client", smdp);
-        if (placeholder_authenticate_client(&euicc_ctx)) {
+        if (zk_authenticate_client(&euicc_ctx)) {
             error_function_name = "placeholder_authenticate_client";
             error_detail = NULL;
             goto err;

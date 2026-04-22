@@ -22,6 +22,8 @@ static int applet_main(int argc, char **argv) {
     char *imei = NULL;
 
     _cleanup_es11_smdp_list_ char **smdp_list = NULL;
+    const bool is_simulated = getenv("LPAC_CUSTOM_ISD_R_AID") != NULL;
+
 
     cJSON *jdata = NULL;
 

@@ -4,7 +4,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 #include <cjson-ext/cJSON_ex.h>
 
@@ -254,15 +253,11 @@ exit:
 int es9p_initiate_authentication_r(struct euicc_ctx *ctx, char **transaction_id,
                                    struct es10b_authenticate_server_param *resp, const char *server_address,
                                    const char *b64_euicc_challenge, const char *b64_euicc_info_1) {
-
-    printf("\n transaction_id = %s... \n", transaction_id);
     const char *ikey[] = {"smdpAddress", "euiccChallenge", "euiccInfo1", NULL};
     const char *idata[] = {server_address, b64_euicc_challenge, b64_euicc_info_1, NULL};
-
     const char *okey[] = {"transactionId",       "serverSigned1",     "serverSignature1",
                           "euiccCiPKIdToBeUsed", "serverCertificate", NULL};
     const char oobj[] = {0, 0, 0, 0, 0};
-
     void **optr[] = {(void **)transaction_id,
                      (void **)&resp->b64_serverSigned1,
                      (void **)&resp->b64_serverSignature1,
@@ -433,33 +428,27 @@ exit:
 }
 
 int es9p_initiate_authentication(struct euicc_ctx *ctx) {
-
     int fret;
 
-    printf("\n authenticate server param: %s \n", ctx->http._internal.authenticate_server_param);
     if (ctx->http._internal.authenticate_server_param) {
         return -1;
     }
-
-    printf("\n euicc challenge param: %s \n", ctx->http._internal.b64_euicc_challenge);
 
     if (ctx->http._internal.b64_euicc_challenge == NULL) {
         return -1;
     }
 
-    printf("\n euicc info param: %s \n", ctx->http._internal.b64_euicc_info_1);
     if (ctx->http._internal.b64_euicc_info_1 == NULL) {
         return -1;
     }
 
     ctx->http._internal.authenticate_server_param = malloc(sizeof(struct es10b_authenticate_server_param));
-    printf("\n auth server  param: %s \n", ctx->http._internal.authenticate_server_param);
     if (ctx->http._internal.authenticate_server_param == NULL) {
         return -1;
     }
-    printf("\n assigning fret... \n");
-    fret = es9p_initiate_authentication_r(ctx, &ctx->http._internal.transaction_id_http, ctx->http._internal.authenticate_server_param,
-            ctx->http.server_address, ctx->http._internal.b64_euicc_challenge, ctx->http._internal.b64_euicc_info_1);
+    fret = es9p_initiate_authentication_r(
+        ctx, &ctx->http._internal.transaction_id_http, ctx->http._internal.authenticate_server_param,
+        ctx->http.server_address, ctx->http._internal.b64_euicc_challenge, ctx->http._internal.b64_euicc_info_1);
     
     if (fret < 0) {
         free(ctx->http._internal.authenticate_server_param);

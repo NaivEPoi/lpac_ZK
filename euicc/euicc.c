@@ -161,7 +161,6 @@ int euicc_init(struct euicc_ctx *ctx) {
 
     ret = ctx->apdu.interface->connect(ctx);
     if (ret < 0) {
-        printf("\n failing to connect apdu interface with euicc ctx... \n");
         return -1;
     }
 

@@ -94,7 +94,6 @@ static int applet_main(int argc, char **argv) {
         }
     }
 
-    (void)mno_cacert;
     if (!mno || !smdp) {
         error_function_name = "arguments";
         error_detail = strdup("missing -m MNO_URL or -d SMDP_URL");
@@ -102,6 +101,11 @@ static int applet_main(int argc, char **argv) {
     }
 
     signal(SIGINT, sigint_handler);
+
+    /* Use the MNO CA bundle (if supplied) for the Phase 1/2 hops to the MNO
+     * server.  The SMDP+ leg below clears it again because the SMDP+ test
+     * cert isn't in this bundle. */
+    euicc_ctx.http.cainfo = mno_cacert;
 
     CANCELPOINT();
     jprint_progress("es12p_get_mno_challenge", mno);
@@ -154,6 +158,10 @@ static int applet_main(int argc, char **argv) {
     }
 
     es12p_ack(&euicc_ctx, mno, request_id, true);
+
+    /* Done with MNO traffic; clear the cacert so the SMDP+ leg keeps
+     * matching the existing dev-mode behaviour (no peer verification). */
+    euicc_ctx.http.cainfo = NULL;
 
     euicc_ctx.http.server_address = smdp_address ? smdp_address : smdp;
 
@@ -217,6 +225,9 @@ static int applet_main(int argc, char **argv) {
 
 err:
     if (request_id) {
+        /* Restore the MNO cacert in case the failure happened on the SMDP+
+         * leg (which clears it). */
+        euicc_ctx.http.cainfo = mno_cacert;
         es12p_ack(&euicc_ctx, mno, request_id, false);
     }
     if (!cancelled) {

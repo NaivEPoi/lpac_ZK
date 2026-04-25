@@ -20,6 +20,7 @@
 #    define CURLOPT_HTTPHEADER 10023
 #    define CURLOPT_POSTFIELDS 10015
 #    define CURLOPT_POSTFIELDSIZE 60
+#    define CURLOPT_CAINFO 10065
 #    define CURLINFO_RESPONSE_CODE 2097154
 
 typedef void CURL;
@@ -88,8 +89,14 @@ static int http_interface_transmit(struct euicc_ctx *ctx, const char *url, uint3
     libcurl._curl_easy_setopt(curl, CURLOPT_URL, url);
     libcurl._curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_trans_write_callback);
     libcurl._curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&responseData);
-    libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    if (ctx->http.cainfo && ctx->http.cainfo[0]) {
+        libcurl._curl_easy_setopt(curl, CURLOPT_CAINFO, ctx->http.cainfo);
+        libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    } else {
+        libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        libcurl._curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
     for (int i = 0; h[i] != NULL; i++) {
         nheaders = libcurl._curl_slist_append(headers, h[i]);
         if (nheaders == NULL) {

@@ -28,6 +28,8 @@ struct euicc_ctx {
     struct {
         const struct euicc_http_interface *interface;
         const char *server_address;
+        const char *cainfo; /* optional path to a CA bundle/cert; when set, the
+                               HTTP driver MUST verify the peer against it */
         struct {
             char subjectCode[8 + 1];
             char reasonCode[8 + 1];

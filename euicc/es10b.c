@@ -162,6 +162,101 @@ exit:
     return fret;
 }
 
+int es10b_zk_profile_request(struct euicc_ctx *ctx, const char *b64_mno_challenge,
+                             char **b64_zk_profile_response) {
+    int fret = 0;
+    uint8_t *challenge = NULL;
+    int challenge_len;
+    uint8_t *reqbuf = NULL;
+    uint32_t reqlen;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+    struct euicc_derutil_node n_request, n_challenge;
+
+    *b64_zk_profile_response = NULL;
+    memset(&n_request, 0, sizeof(n_request));
+    memset(&n_challenge, 0, sizeof(n_challenge));
+
+    challenge = malloc(euicc_base64_decode_len(b64_mno_challenge));
+    if (!challenge) {
+        goto err;
+    }
+    challenge_len = euicc_base64_decode(challenge, b64_mno_challenge);
+    if (challenge_len != 16) {
+        goto err;
+    }
+
+    n_request.tag = 0xBF42;
+    n_request.pack.child = &n_challenge;
+    n_challenge.tag = 0x80;
+    n_challenge.value = challenge;
+    n_challenge.length = (uint32_t)challenge_len;
+
+    if (euicc_derutil_pack_alloc(&reqbuf, &reqlen, &n_request) < 0) {
+        goto err;
+    }
+    if (es10x_command(ctx, &respbuf, &resplen, reqbuf, reqlen) < 0) {
+        goto err;
+    }
+
+    *b64_zk_profile_response = malloc(euicc_base64_encode_len(resplen));
+    if (!*b64_zk_profile_response) {
+        goto err;
+    }
+    if (euicc_base64_encode(*b64_zk_profile_response, respbuf, resplen) < 0) {
+        goto err;
+    }
+
+    goto exit;
+
+err:
+    fret = -1;
+    free(*b64_zk_profile_response);
+    *b64_zk_profile_response = NULL;
+exit:
+    free(challenge);
+    free(reqbuf);
+    free(respbuf);
+    return fret;
+}
+
+int es10b_set_eligibility_data(struct euicc_ctx *ctx, const uint8_t *set_eligibility_req_der,
+                               uint32_t der_len, int *result_code) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+    struct euicc_derutil_node n_bf43, n_choice;
+
+    *result_code = -1;
+    if (es10x_command(ctx, &respbuf, &resplen, set_eligibility_req_der, der_len) < 0) {
+        goto err;
+    }
+    if (euicc_derutil_unpack_find_tag(&n_bf43, 0xBF43, respbuf, resplen) < 0) {
+        goto err;
+    }
+    if (euicc_derutil_unpack_first(&n_choice, n_bf43.value, n_bf43.length) < 0) {
+        goto err;
+    }
+    if (n_choice.tag == 0xA0) {
+        *result_code = 0;
+        goto exit;
+    }
+    if (n_choice.tag == 0xA1) {
+        struct euicc_derutil_node n_error;
+        if (euicc_derutil_unpack_find_tag(&n_error, 0x02, n_choice.value, n_choice.length) == 0) {
+            *result_code = (int)euicc_derutil_convert_bin2long(n_error.value, n_error.length);
+        }
+        goto err;
+    }
+    goto err;
+
+err:
+    fret = -1;
+exit:
+    free(respbuf);
+    return fret;
+}
+
 static int es10b_load_bound_profile_package_tx(struct euicc_ctx *ctx,
                                                struct es10b_load_bound_profile_package_result *result,
                                                const uint8_t *reqbuf, int reqbuf_len) {

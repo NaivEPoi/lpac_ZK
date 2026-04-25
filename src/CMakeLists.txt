@@ -19,6 +19,7 @@ target_sources(
         applet/profile/list.c
         applet/profile/nickname.c
         applet/profile/download.c
+        applet/profile/zk-download.c
         applet/chip.c
         applet/notification.c
         applet/profile.c

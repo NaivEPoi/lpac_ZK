@@ -13,6 +13,7 @@ target_sources(
         derutil.c
         es8p.c
         es9p.c
+        es12p.c
         es9p_errors.c
         es10a.c
         es10b.c
@@ -45,6 +46,7 @@ target_sources(
             base64.h
             es8p.h
             es9p_errors.h
+            es12p.h
             es10b.h
             es10c_ex.h
             interface.h

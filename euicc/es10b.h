@@ -144,6 +144,10 @@ int es10b_load_bound_profile_package(struct euicc_ctx *ctx, struct es10b_load_bo
 int es10b_get_euicc_challenge_and_info(struct euicc_ctx *ctx);
 int es10b_authenticate_server(struct euicc_ctx *ctx, const char *matchingId, const char *imei);
 int es10b_cancel_session(struct euicc_ctx *ctx, enum es10b_cancel_session_reason reason);
+int es10b_zk_profile_request(struct euicc_ctx *ctx, const char *b64_mno_challenge,
+                             char **b64_zk_profile_response);
+int es10b_set_eligibility_data(struct euicc_ctx *ctx, const uint8_t *set_eligibility_req_der,
+                               uint32_t der_len, int *result_code);
 
 int es10b_list_notification(struct euicc_ctx *ctx, struct es10b_notification_metadata_list **notificationMetadataList);
 int es10b_retrieve_notifications_list(struct euicc_ctx *ctx, struct es10b_pending_notification *PendingNotification,

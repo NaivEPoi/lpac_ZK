@@ -1,255 +1,197 @@
 #include "zk-download.h"
 #include "main.h"
 
-#include <euicc/base64.h>
-#include <euicc/es9p.h>
 #include <euicc/es10b.h>
 #include <euicc/es12p.h>
+#include <euicc/es9p.h>
+#include <euicc/base64.h>
+#include <euicc/euicc.h>
 #include <euicc/tostr.h>
 #include <lpac/utils.h>
 
-#include <cjson-ext/cJSON_ex.h>
-
 #include <getopt.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static volatile int cancelled = 0;
-
-#define CANCELPOINT() \
-    if (cancelled) {  \
-        goto err;     \
-    }
-
-static void sigint_handler(__attribute__((unused)) int x) { cancelled = 1; }
-
-static cJSON *build_download_result_json(const struct es10b_load_bound_profile_package_result *result) {
-    cJSON *jdata = cJSON_CreateObject();
-    if (!jdata) {
-        return NULL;
-    }
-    cJSON_AddNumberToObject(jdata, "seqNumber", (double)result->seqNumber);
-    cJSON_AddStringOrNullToObject(jdata, "iccid", result->iccid);
-    cJSON_AddStringToObject(jdata, "bppCommandId", euicc_bppcommandid2str(result->bppCommandId));
-    cJSON_AddStringToObject(jdata, "errorReason", euicc_errorreason2str(result->errorReason));
-    return jdata;
-}
+static const char *opt_string = "n:s:i:h?";
 
 static int applet_main(int argc, char **argv) {
-    int fret = -1;
-    int opt;
-    int option_index = 0;
+    int fret;
     const char *error_function_name = NULL;
     _cleanup_free_ char *error_detail = NULL;
 
-    char *mno = NULL;
+    int opt;
+    char *mno_addr = NULL;
     char *smdp = NULL;
-    char *matching_id = NULL;
-    char *confirmation_code = NULL;
-    char *mno_cacert = NULL;
-    char *b64_mno_challenge = NULL;
-    char *request_id = NULL;
-    char *b64_zk_profile_response = NULL;
-    char *b64_set_eligibility_req = NULL;
-    char *iccid = NULL;
-    char *issued_matching_id = NULL;
-    char *smdp_address = NULL;
-    uint8_t *set_eligibility_req = NULL;
-    int set_eligibility_req_len = 0;
-    int set_eligibility_result = -1;
+    char *imei = NULL;
+
+    _cleanup_free_ char *b64_zk_resp = NULL;
+    uint8_t *bf43_raw = NULL;
+    int bf43_len;
+
+    struct es12p_challenge_result challenge;
+    struct es12p_zk_request_result zk_result;
     struct es10b_load_bound_profile_package_result download_result = {0};
 
-    static struct option long_options[] = {
-        {"mno-cacert", required_argument, 0, 1000},
-        {0, 0, 0, 0},
-    };
+    memset(&challenge, 0, sizeof(challenge));
+    memset(&zk_result, 0, sizeof(zk_result));
 
-    while ((opt = getopt_long(argc, argv, "m:d:i:c:h?", long_options, &option_index)) != -1) {
+    while ((opt = getopt(argc, argv, opt_string)) != -1) {
         switch (opt) {
-        case 'm':
-            mno = strdup(optarg);
+        case 'n':
+            mno_addr = strdup(optarg);
             break;
-        case 'd':
+        case 's':
             smdp = strdup(optarg);
             break;
         case 'i':
-            matching_id = strdup(optarg);
-            break;
-        case 'c':
-            confirmation_code = strdup(optarg);
-            break;
-        case 1000:
-            mno_cacert = strdup(optarg);
+            imei = strdup(optarg);
             break;
         case 'h':
         case '?':
-            printf("Usage: %s -m MNO_URL -d SMDP_URL [-i MatchingId] [-c ConfirmationCode] [--mno-cacert PATH]\n", argv[0]);
+            printf("Usage: %s [OPTIONS]\n", argv[0]);
+            printf("\t -n MNO Server Address (required)\n");
+            printf("\t -s SM-DP+ Address (optional; overrides MNO-provided address)\n");
+            printf("\t -i IMEI (optional)\n");
+            printf("\t -h This help info\n");
             return -1;
         default:
             break;
         }
     }
 
-    if (!mno || !smdp) {
-        error_function_name = "arguments";
-        error_detail = strdup("missing -m MNO_URL or -d SMDP_URL");
+    if (!mno_addr) {
+        error_function_name = "mno_addr";
+        error_detail = strdup("required");
         goto err;
     }
 
-    signal(SIGINT, sigint_handler);
-
-    /* Use the MNO CA bundle (if supplied) for the Phase 1/2 hops to the MNO
-     * server.  The SMDP+ leg below clears it again because the SMDP+ test
-     * cert isn't in this bundle. */
-    euicc_ctx.http.cainfo = mno_cacert;
-
-    CANCELPOINT();
-    jprint_progress("es12p_get_mno_challenge", mno);
-    if (es12p_get_mno_challenge(&euicc_ctx, mno, &b64_mno_challenge, &request_id)) {
+    /* Phase 1: obtain MNO challenge */
+    jprint_progress("es12p_get_mno_challenge", mno_addr);
+    if (es12p_get_mno_challenge(&euicc_ctx, mno_addr, &challenge) < 0) {
         error_function_name = "es12p_get_mno_challenge";
         goto err;
     }
 
-    CANCELPOINT();
+    /* Phase 1: run BF42 ZKProfileRequest on the eUICC */
     jprint_progress("es10b_zk_profile_request", NULL);
-    if (es10b_zk_profile_request(&euicc_ctx, b64_mno_challenge, &b64_zk_profile_response)) {
+    if (es10b_zk_profile_request_r(&euicc_ctx, &b64_zk_resp,
+                                    challenge.mnoChallenge, 16) < 0) {
         error_function_name = "es10b_zk_profile_request";
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es12p_zk_request", mno);
-    if (es12p_zk_request(&euicc_ctx, mno, request_id, b64_zk_profile_response, matching_id,
-                         &b64_set_eligibility_req, &iccid, &issued_matching_id, &smdp_address)) {
+    /* Phase 2: send ZK proof to MNO, receive eligibility credentials */
+    jprint_progress("es12p_zk_request", mno_addr);
+    if (es12p_zk_request(&euicc_ctx, mno_addr, challenge.requestId,
+                          b64_zk_resp, &zk_result) < 0) {
         error_function_name = "es12p_zk_request";
         goto err;
     }
 
-    int set_eligibility_req_alloc = euicc_base64_decode_len(b64_set_eligibility_req);
-    if (set_eligibility_req_alloc <= 0) {
-        error_function_name = "base64_decode";
+    /* Phase 2: decode BF43 TLV and write credentials into the eUICC */
+    bf43_raw = malloc((size_t)euicc_base64_decode_len(zk_result.setEligibilityDataB64));
+    if (!bf43_raw) {
+        error_function_name = "bf43_alloc";
         goto err;
     }
-    set_eligibility_req = malloc((size_t)set_eligibility_req_alloc);
-    if (!set_eligibility_req) {
-        error_function_name = "base64_decode";
-        goto err;
-    }
-    set_eligibility_req_len = euicc_base64_decode(set_eligibility_req, b64_set_eligibility_req);
-    if (set_eligibility_req_len < 0) {
-        error_function_name = "base64_decode";
+    if ((bf43_len = euicc_base64_decode(bf43_raw, zk_result.setEligibilityDataB64)) < 0) {
+        error_function_name = "bf43_decode";
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es10b_set_eligibility_data", iccid);
-    if (es10b_set_eligibility_data(&euicc_ctx, set_eligibility_req,
-                                   (uint32_t)set_eligibility_req_len, &set_eligibility_result)) {
+    jprint_progress("es10b_set_eligibility_data", NULL);
+    if (es10b_set_eligibility_data_r(&euicc_ctx, bf43_raw, (uint32_t)bf43_len) < 0) {
         error_function_name = "es10b_set_eligibility_data";
-        error_detail = malloc(32);
-        if (error_detail) {
-            snprintf(error_detail, 32, "result=%d", set_eligibility_result);
-        }
         goto err;
     }
 
-    es12p_ack(&euicc_ctx, mno, request_id, true);
+    /* Phase 2: acknowledge to MNO (best-effort, non-fatal) */
+    jprint_progress("es12p_ack", mno_addr);
+    es12p_ack(&euicc_ctx, mno_addr, challenge.requestId, 1);
 
-    /* Done with MNO traffic; clear the cacert so the SMDP+ leg keeps
-     * matching the existing dev-mode behaviour (no peer verification). */
-    euicc_ctx.http.cainfo = NULL;
+    /* Use SM-DP+ address from MNO response unless overridden by -s */
+    if (!smdp && zk_result.smdpAddress) {
+        smdp = strdup(zk_result.smdpAddress);
+    }
+    if (!smdp) {
+        error_function_name = "smdpAddress";
+        error_detail = strdup("empty");
+        goto err;
+    }
 
-    euicc_ctx.http.server_address = smdp_address ? smdp_address : smdp;
+    euicc_ctx.http.server_address = smdp;
 
-    CANCELPOINT();
-    jprint_progress("es10b_get_euicc_challenge_and_info", euicc_ctx.http.server_address);
+    /* Phase 3-4: standard SGP.22 profile download against the SM-DP+ */
+    jprint_progress("es10b_get_euicc_challenge_and_info", smdp);
     if (es10b_get_euicc_challenge_and_info(&euicc_ctx)) {
         error_function_name = "es10b_get_euicc_challenge_and_info";
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es9p_initiate_authentication", euicc_ctx.http.server_address);
+    jprint_progress("es9p_initiate_authentication", smdp);
     if (es9p_initiate_authentication(&euicc_ctx)) {
         error_function_name = "es9p_initiate_authentication";
         error_detail = strdup(euicc_ctx.http.status.message);
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es10b_authenticate_server", issued_matching_id);
-    if (es10b_authenticate_server(&euicc_ctx, issued_matching_id, NULL)) {
+    jprint_progress("es10b_authenticate_server", smdp);
+    if (es10b_authenticate_server(&euicc_ctx, zk_result.matchingId, imei)) {
         error_function_name = "es10b_authenticate_server";
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es9p_authenticate_client", euicc_ctx.http.server_address);
+    jprint_progress("es9p_authenticate_client", smdp);
     if (es9p_authenticate_client(&euicc_ctx)) {
         error_function_name = "es9p_authenticate_client";
         error_detail = strdup(euicc_ctx.http.status.message);
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es10b_prepare_download", NULL);
-    if (es10b_prepare_download(&euicc_ctx, confirmation_code)) {
+    jprint_progress("es10b_prepare_download", smdp);
+    if (es10b_prepare_download(&euicc_ctx, NULL)) {
         error_function_name = "es10b_prepare_download";
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es9p_get_bound_profile_package", euicc_ctx.http.server_address);
+    jprint_progress("es9p_get_bound_profile_package", smdp);
     if (es9p_get_bound_profile_package(&euicc_ctx)) {
         error_function_name = "es9p_get_bound_profile_package";
         error_detail = strdup(euicc_ctx.http.status.message);
         goto err;
     }
 
-    CANCELPOINT();
-    jprint_progress("es10b_load_bound_profile_package", euicc_ctx.http.server_address);
+    jprint_progress("es10b_load_bound_profile_package", smdp);
     if (es10b_load_bound_profile_package(&euicc_ctx, &download_result)) {
-        jprint_progress_obj("es10b_load_bound_profile_package:result", build_download_result_json(&download_result));
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), "%s,%s",
+                 euicc_bppcommandid2str(download_result.bppCommandId),
+                 euicc_errorreason2str(download_result.errorReason));
         error_function_name = "es10b_load_bound_profile_package";
-        error_detail = strdup("load failed");
+        error_detail = strdup(buffer);
         goto err;
     }
 
-    jprint_success(build_download_result_json(&download_result));
+    jprint_success(NULL);
+
     fret = 0;
     goto exit;
 
 err:
-    if (request_id) {
-        /* Restore the MNO cacert in case the failure happened on the SMDP+
-         * leg (which clears it). */
-        euicc_ctx.http.cainfo = mno_cacert;
-        es12p_ack(&euicc_ctx, mno, request_id, false);
-    }
-    if (!cancelled) {
-        jprint_error(error_function_name, error_detail);
-    } else {
-        jprint_error("cancelled", NULL);
-    }
+    fret = -1;
+    es10b_cancel_session(&euicc_ctx, ES10B_CANCEL_SESSION_REASON_ENDUSERREJECTION);
+    es9p_cancel_session(&euicc_ctx);
+    jprint_error(error_function_name, error_detail);
 exit:
-    euicc_http_cleanup(&euicc_ctx);
-    free(mno);
+    free(mno_addr);
     free(smdp);
-    free(matching_id);
-    free(confirmation_code);
-    free(mno_cacert);
-    free(b64_mno_challenge);
-    free(request_id);
-    free(b64_zk_profile_response);
-    free(b64_set_eligibility_req);
-    free(iccid);
-    free(issued_matching_id);
-    free(smdp_address);
-    free(set_eligibility_req);
+    free(imei);
+    free(bf43_raw);
+    es12p_challenge_result_free(&challenge);
+    es12p_zk_request_result_free(&zk_result);
+    euicc_http_cleanup(&euicc_ctx);
     return fret;
 }
 

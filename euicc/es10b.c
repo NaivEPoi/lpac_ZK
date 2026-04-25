@@ -1483,3 +1483,83 @@ void es10b_rat_list_free_all(struct es10b_rat *ratList) {
         ratList = next_rat;
     }
 }
+
+int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileResponse,
+                                const uint8_t *mnoChallenge, uint32_t challengeLen) {
+    int fret = 0;
+    uint8_t reqbuf[21];
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+
+    *b64_ZKProfileResponse = NULL;
+
+    if (challengeLen != 16) {
+        goto err;
+    }
+
+    /* BF42 { 80 10 <16B challenge> } — value len = 2 + 16 = 18 = 0x12 */
+    reqbuf[0] = 0xBF;
+    reqbuf[1] = 0x42;
+    reqbuf[2] = 0x12;
+    reqbuf[3] = 0x80;
+    reqbuf[4] = 0x10;
+    memcpy(reqbuf + 5, mnoChallenge, 16);
+
+    if (es10x_command(ctx, &respbuf, &resplen, reqbuf, sizeof(reqbuf)) < 0) {
+        goto err;
+    }
+
+    /* Verify outer tag is BF42 */
+    if (resplen < 3 || respbuf[0] != 0xBF || respbuf[1] != 0x42) {
+        goto err;
+    }
+
+    *b64_ZKProfileResponse = malloc(euicc_base64_encode_len(resplen));
+    if (!*b64_ZKProfileResponse) {
+        goto err;
+    }
+    if (euicc_base64_encode(*b64_ZKProfileResponse, respbuf, resplen) < 0) {
+        goto err;
+    }
+
+    fret = 0;
+    goto exit;
+
+err:
+    fret = -1;
+    free(*b64_ZKProfileResponse);
+    *b64_ZKProfileResponse = NULL;
+exit:
+    free(respbuf);
+    respbuf = NULL;
+    return fret;
+}
+
+int es10b_set_eligibility_data_r(struct euicc_ctx *ctx, const uint8_t *bf43_tlv, uint32_t bf43_len) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+    struct euicc_derutil_node n_outer, n_choice;
+
+    if (es10x_command(ctx, &respbuf, &resplen, bf43_tlv, bf43_len) < 0) {
+        goto err;
+    }
+
+    /* Response: BF43 { A0 { 30 {} } } for success, BF43 { A1 { INT } } for error */
+    if (euicc_derutil_unpack_find_tag(&n_outer, 0xBF43, respbuf, resplen) < 0) {
+        goto err;
+    }
+    if (euicc_derutil_unpack_find_tag(&n_choice, 0xA0, n_outer.value, n_outer.length) < 0) {
+        goto err;
+    }
+
+    fret = 0;
+    goto exit;
+
+err:
+    fret = -1;
+exit:
+    free(respbuf);
+    respbuf = NULL;
+    return fret;
+}

@@ -16,8 +16,9 @@
 #include <unistd.h>
 
 static const struct applet_entry *applets[] = {
-    &applet_profile_list,   &applet_profile_enable,   &applet_profile_disable,   &applet_profile_nickname,
-    &applet_profile_delete, &applet_profile_download, &applet_profile_zk_download, &applet_profile_discovery, NULL,
+    &applet_profile_list,   &applet_profile_enable,    &applet_profile_disable,   &applet_profile_nickname,
+    &applet_profile_delete, &applet_profile_download,  &applet_profile_discovery,
+    &applet_profile_zk_download, NULL,
 };
 
 static int applet_main(const int argc, char **argv) {

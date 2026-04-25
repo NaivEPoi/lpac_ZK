@@ -1,13 +1,30 @@
 #pragma once
 
-#include <stdbool.h>
+#include <stdint.h>
 
-#include "euicc.h"
+struct euicc_ctx;
 
-int es12p_get_mno_challenge(struct euicc_ctx *ctx, const char *mno_url,
-                            char **out_b64_mno_challenge, char **out_request_id);
-int es12p_zk_request(struct euicc_ctx *ctx, const char *mno_url, const char *request_id,
-                     const char *b64_zk_profile_response, const char *matching_id,
-                     char **out_b64_set_eligibility_req, char **out_iccid,
-                     char **out_matching_id, char **out_smdp_address);
-int es12p_ack(struct euicc_ctx *ctx, const char *mno_url, const char *request_id, bool ok);
+struct es12p_challenge_result {
+    char    *requestId;
+    uint8_t  mnoChallenge[16];
+};
+
+struct es12p_zk_request_result {
+    char *setEligibilityDataB64;
+    char *iccid;
+    char *matchingId;
+    char *smdpAddress;
+};
+
+int es12p_get_mno_challenge(struct euicc_ctx *ctx, const char *mno_addr,
+                             struct es12p_challenge_result *result);
+
+int es12p_zk_request(struct euicc_ctx *ctx, const char *mno_addr,
+                      const char *request_id, const char *b64_zk_response,
+                      struct es12p_zk_request_result *result);
+
+int es12p_ack(struct euicc_ctx *ctx, const char *mno_addr,
+               const char *request_id, int ok);
+
+void es12p_challenge_result_free(struct es12p_challenge_result *result);
+void es12p_zk_request_result_free(struct es12p_zk_request_result *result);

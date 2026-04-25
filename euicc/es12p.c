@@ -1,197 +1,254 @@
 #include "es12p.h"
+#include "euicc.h"
+#include "hexutil.h"
 #include "logger.h"
 
-#include <cjson-ext/cJSON_ex.h>
-
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
-static const char *mno_header[] = {
+#include <cjson/cJSON.h>
+#include <cjson-ext/cJSON_ex.h>
+
+static const char *mno_headers[] = {
     "User-Agent: gsma-rsp-lpad",
     "Content-Type: application/json",
     NULL,
 };
 
-static char *build_url(const char *mno_url, const char *path) {
-    char *out = NULL;
-    const int has_scheme = strstr(mno_url, "://") != NULL;
-    const char *prefix = has_scheme ? "" : "https://";
-    out = malloc(strlen(prefix) + strlen(mno_url) + strlen(path) + 1);
-    if (!out) {
-        return NULL;
-    }
-    out[0] = '\0';
-    strcat(out, prefix);
-    strcat(out, mno_url);
-    strcat(out, path);
-    return out;
-}
-
-static int mno_trans_json(struct euicc_ctx *ctx, const char *mno_url, const char *path,
-                          cJSON *tx, cJSON **rx) {
+static int es12p_trans_ex(struct euicc_ctx *ctx, const char *mno_addr, const char *path,
+                           uint32_t *rcode, char **str_rx, const char *str_tx) {
     int fret = 0;
-    char *url = NULL;
-    char *tx_str = NULL;
+    uint32_t rcode_local = 0;
     uint8_t *rbuf = NULL;
-    uint32_t rlen = 0;
-    uint32_t rcode = 0;
+    uint32_t rlen;
+    char *full_url = NULL;
+    const char *url_prefix = "https://";
 
-    *rx = NULL;
     if (!ctx->http.interface) {
         goto err;
     }
-    url = build_url(mno_url, path);
-    if (!url) {
+
+    full_url = malloc(strlen(url_prefix) + strlen(mno_addr) + strlen(path) + 1);
+    if (!full_url) {
         goto err;
     }
-    tx_str = cJSON_PrintUnformatted(tx);
-    if (!tx_str) {
+    full_url[0] = '\0';
+    strcat(full_url, url_prefix);
+    strcat(full_url, mno_addr);
+    strcat(full_url, path);
+
+    euicc_http_request_print(ctx->http.log_fp, full_url, str_tx);
+
+    if (ctx->http.interface->transmit(ctx, full_url, &rcode_local, &rbuf, &rlen,
+                                      (const uint8_t *)str_tx, (uint32_t)strlen(str_tx),
+                                      mno_headers) < 0) {
         goto err;
     }
 
-    euicc_http_request_print(ctx->http.log_fp, url, tx_str);
-    if (ctx->http.interface->transmit(ctx, url, &rcode, &rbuf, &rlen, (const uint8_t *)tx_str,
-                                      strlen(tx_str), mno_header) < 0) {
-        fprintf(stderr, "MNO HTTP transmit failed: %s\n", url);
+    euicc_http_response_print(ctx->http.log_fp, rcode_local, (char *)rbuf);
+
+    free(full_url);
+    full_url = NULL;
+
+    *str_rx = malloc(rlen + 1);
+    if (!*str_rx) {
         goto err;
     }
-    euicc_http_response_print(ctx->http.log_fp, rcode, (char *)rbuf);
-    if (rcode / 100 != 2) {
-        fprintf(stderr, "MNO HTTP returned %u from %s: %.*s\n", rcode, url, (int)rlen, rbuf ? (char *)rbuf : "");
-        goto err;
-    }
-    *rx = cJSON_ParseWithLength((const char *)rbuf, rlen);
-    if (!*rx) {
-        fprintf(stderr, "MNO HTTP returned invalid JSON from %s: %.*s\n", url, (int)rlen, rbuf ? (char *)rbuf : "");
-        goto err;
-    }
+    memcpy(*str_rx, rbuf, rlen);
+    (*str_rx)[rlen] = '\0';
+
+    free(rbuf);
+    rbuf = NULL;
+
+    *rcode = rcode_local;
+    fret = 0;
     goto exit;
 
 err:
     fret = -1;
-    cJSON_Delete(*rx);
-    *rx = NULL;
 exit:
-    free(url);
-    cJSON_free(tx_str);
+    free(full_url);
     free(rbuf);
     return fret;
 }
 
-static int take_string(cJSON *root, const char *key, char **out) {
-    cJSON *item = cJSON_GetObjectItem(root, key);
-    if (!cJSON_IsString(item)) {
-        fprintf(stderr, "MNO response missing string field: %s\n", key);
-        return -1;
-    }
-    *out = strdup(item->valuestring);
-    return *out ? 0 : -1;
-}
-
-int es12p_get_mno_challenge(struct euicc_ctx *ctx, const char *mno_url,
-                            char **out_b64_mno_challenge, char **out_request_id) {
+int es12p_get_mno_challenge(struct euicc_ctx *ctx, const char *mno_addr,
+                             struct es12p_challenge_result *result) {
     int fret = 0;
-    cJSON *tx = cJSON_CreateObject();
-    cJSON *rx = NULL;
+    uint32_t rcode;
+    char *rbuf = NULL;
+    cJSON *jroot = NULL;
+    cJSON *j_request_id, *j_challenge;
 
-    *out_b64_mno_challenge = NULL;
-    *out_request_id = NULL;
-    if (!tx) {
+    memset(result, 0, sizeof(*result));
+
+    if (es12p_trans_ex(ctx, mno_addr, "/zk-esim/v1/getMNOChallenge", &rcode, &rbuf, "{}") < 0) {
         goto err;
     }
-    if (mno_trans_json(ctx, mno_url, "/zk-esim/v1/getMNOChallenge", tx, &rx) < 0) {
+    if (rcode / 100 != 2) {
         goto err;
     }
-    if (take_string(rx, "mnoChallenge", out_b64_mno_challenge) < 0) {
+
+    jroot = cJSON_Parse(rbuf);
+    if (!jroot) {
         goto err;
     }
-    if (take_string(rx, "requestId", out_request_id) < 0) {
+
+    j_request_id = cJSON_GetObjectItem(jroot, "requestId");
+    j_challenge  = cJSON_GetObjectItem(jroot, "mnoChallenge");
+
+    if (!cJSON_IsString(j_request_id) || !cJSON_IsString(j_challenge)) {
         goto err;
     }
+
+    result->requestId = strdup(j_request_id->valuestring);
+    if (!result->requestId) {
+        goto err;
+    }
+
+    if (euicc_hexutil_hex2bin(result->mnoChallenge, sizeof(result->mnoChallenge),
+                              j_challenge->valuestring) < 0) {
+        goto err;
+    }
+
+    fret = 0;
     goto exit;
 
 err:
     fret = -1;
-    free(*out_b64_mno_challenge);
-    free(*out_request_id);
-    *out_b64_mno_challenge = NULL;
-    *out_request_id = NULL;
+    free(result->requestId);
+    result->requestId = NULL;
 exit:
-    cJSON_Delete(tx);
-    cJSON_Delete(rx);
+    cJSON_Delete(jroot);
+    free(rbuf);
     return fret;
 }
 
-int es12p_zk_request(struct euicc_ctx *ctx, const char *mno_url, const char *request_id,
-                     const char *b64_zk_profile_response, const char *matching_id,
-                     char **out_b64_set_eligibility_req, char **out_iccid,
-                     char **out_matching_id, char **out_smdp_address) {
+int es12p_zk_request(struct euicc_ctx *ctx, const char *mno_addr,
+                      const char *request_id, const char *b64_zk_response,
+                      struct es12p_zk_request_result *result) {
     int fret = 0;
-    cJSON *tx = cJSON_CreateObject();
-    cJSON *rx = NULL;
+    uint32_t rcode;
+    char *rbuf = NULL;
+    char *sbuf = NULL;
+    cJSON *sjroot = NULL;
+    cJSON *rjroot = NULL;
+    cJSON *j_elig, *j_iccid, *j_mid, *j_smdp;
 
-    *out_b64_set_eligibility_req = NULL;
-    *out_iccid = NULL;
-    *out_matching_id = NULL;
-    *out_smdp_address = NULL;
-    if (!tx) {
+    memset(result, 0, sizeof(*result));
+
+    sjroot = cJSON_CreateObject();
+    if (!sjroot) {
         goto err;
     }
-    cJSON_AddStringToObject(tx, "requestId", request_id);
-    cJSON_AddStringToObject(tx, "zkProfileResponse_b64", b64_zk_profile_response);
-    cJSON_AddStringOrNullToObject(tx, "matchingId", matching_id);
-    if (mno_trans_json(ctx, mno_url, "/zk-esim/v1/zkRequest", tx, &rx) < 0) {
+    cJSON_AddStringToObject(sjroot, "requestId", request_id);
+    cJSON_AddStringToObject(sjroot, "zkProfileResponse", b64_zk_response);
+
+    sbuf = cJSON_PrintUnformatted(sjroot);
+    if (!sbuf) {
         goto err;
     }
-    if (take_string(rx, "setEligibilityDataRequest", out_b64_set_eligibility_req) < 0) {
+
+    if (es12p_trans_ex(ctx, mno_addr, "/zk-esim/v1/zkRequest", &rcode, &rbuf, sbuf) < 0) {
         goto err;
     }
-    if (take_string(rx, "iccid", out_iccid) < 0) {
+    if (rcode / 100 != 2) {
         goto err;
     }
-    if (take_string(rx, "matchingId", out_matching_id) < 0) {
+
+    rjroot = cJSON_Parse(rbuf);
+    if (!rjroot) {
         goto err;
     }
-    if (take_string(rx, "smdpAddress", out_smdp_address) < 0) {
+
+    j_elig  = cJSON_GetObjectItem(rjroot, "setEligibilityDataRequest");
+    j_iccid = cJSON_GetObjectItem(rjroot, "iccid");
+    j_mid   = cJSON_GetObjectItem(rjroot, "matchingId");
+    j_smdp  = cJSON_GetObjectItem(rjroot, "smdpAddress");
+
+    if (!cJSON_IsString(j_elig)  || !cJSON_IsString(j_iccid) ||
+        !cJSON_IsString(j_mid)   || !cJSON_IsString(j_smdp)) {
         goto err;
     }
+
+    result->setEligibilityDataB64 = strdup(j_elig->valuestring);
+    result->iccid                 = strdup(j_iccid->valuestring);
+    result->matchingId            = strdup(j_mid->valuestring);
+    result->smdpAddress           = strdup(j_smdp->valuestring);
+
+    if (!result->setEligibilityDataB64 || !result->iccid ||
+        !result->matchingId             || !result->smdpAddress) {
+        goto err;
+    }
+
+    fret = 0;
     goto exit;
 
 err:
     fret = -1;
-    free(*out_b64_set_eligibility_req);
-    free(*out_iccid);
-    free(*out_matching_id);
-    free(*out_smdp_address);
-    *out_b64_set_eligibility_req = NULL;
-    *out_iccid = NULL;
-    *out_matching_id = NULL;
-    *out_smdp_address = NULL;
+    es12p_zk_request_result_free(result);
 exit:
-    cJSON_Delete(tx);
-    cJSON_Delete(rx);
+    cJSON_Delete(sjroot);
+    cJSON_Delete(rjroot);
+    cJSON_free(sbuf);
+    free(rbuf);
     return fret;
 }
 
-int es12p_ack(struct euicc_ctx *ctx, const char *mno_url, const char *request_id, bool ok) {
+int es12p_ack(struct euicc_ctx *ctx, const char *mno_addr,
+               const char *request_id, int ok) {
     int fret = 0;
-    cJSON *tx = cJSON_CreateObject();
-    cJSON *rx = NULL;
-    if (!tx) {
+    uint32_t rcode;
+    char *rbuf = NULL;
+    char *sbuf = NULL;
+    cJSON *sjroot = NULL;
+
+    sjroot = cJSON_CreateObject();
+    if (!sjroot) {
         goto err;
     }
-    cJSON_AddStringToObject(tx, "requestId", request_id);
-    cJSON_AddBoolToObject(tx, "ok", ok);
-    if (mno_trans_json(ctx, mno_url, "/zk-esim/v1/ack", tx, &rx) < 0) {
+    cJSON_AddStringToObject(sjroot, "requestId", request_id);
+    cJSON_AddBoolToObject(sjroot, "ok", ok);
+
+    sbuf = cJSON_PrintUnformatted(sjroot);
+    if (!sbuf) {
         goto err;
     }
+
+    if (es12p_trans_ex(ctx, mno_addr, "/zk-esim/v1/ack", &rcode, &rbuf, sbuf) < 0) {
+        goto err;
+    }
+
+    fret = 0;
     goto exit;
 
 err:
     fret = -1;
 exit:
-    cJSON_Delete(tx);
-    cJSON_Delete(rx);
+    cJSON_Delete(sjroot);
+    cJSON_free(sbuf);
+    free(rbuf);
     return fret;
+}
+
+void es12p_challenge_result_free(struct es12p_challenge_result *result) {
+    if (!result) {
+        return;
+    }
+    free(result->requestId);
+    result->requestId = NULL;
+}
+
+void es12p_zk_request_result_free(struct es12p_zk_request_result *result) {
+    if (!result) {
+        return;
+    }
+    free(result->setEligibilityDataB64);
+    free(result->iccid);
+    free(result->matchingId);
+    free(result->smdpAddress);
+    result->setEligibilityDataB64 = NULL;
+    result->iccid                 = NULL;
+    result->matchingId            = NULL;
+    result->smdpAddress           = NULL;
 }

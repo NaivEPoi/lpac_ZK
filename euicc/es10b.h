@@ -64,6 +64,17 @@ struct es10b_load_bound_profile_package_result {
     enum es10b_error_reason errorReason;
 };
 
+struct es10b_zk_register_challenge_result {
+    char *blindedEligibilityChallenge;
+    char *deviceAuthSignature;
+};
+
+struct es10b_zk_cert_init_result {
+    char *userPublicKey;
+    char *bindingSignature;
+    char *credentialBindingHash;
+};
+
 struct es10b_prepare_download_param {
     char *b64_profileMetadata;
     char *b64_smdpSigned2;
@@ -160,7 +171,18 @@ void es10b_pending_notification_free(struct es10b_pending_notification *PendingN
 int es10b_get_rat(struct euicc_ctx *ctx, struct es10b_rat **ratList);
 void es10b_rat_list_free_all(struct es10b_rat *ratList);
 
-int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileResponse,
-                                const uint8_t *mnoChallenge, uint32_t challengeLen);
+int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileResponse, const uint8_t *mnoChallenge,
+                               uint32_t challengeLen);
 
 int es10b_set_eligibility_data_r(struct euicc_ctx *ctx, const uint8_t *bf43_tlv, uint32_t bf43_len);
+
+int es10b_zk_register_challenge_r(struct euicc_ctx *ctx, struct es10b_zk_register_challenge_result *result,
+                                  const uint8_t *mno_nonce_commitment, uint32_t mno_nonce_commitment_len);
+int es10b_zk_register_credential_r(struct euicc_ctx *ctx, const uint8_t *mno_partial_signature,
+                                   uint32_t mno_partial_signature_len);
+int es10b_zk_cert_init_request_r(struct euicc_ctx *ctx, struct es10b_zk_cert_init_result *result,
+                                 const uint8_t *session_key_seed, uint32_t session_key_seed_len);
+int es10b_zk_cert_install_r(struct euicc_ctx *ctx, const uint8_t *pseudonym_certificate,
+                            uint32_t pseudonym_certificate_len);
+void es10b_zk_register_challenge_result_free(struct es10b_zk_register_challenge_result *result);
+void es10b_zk_cert_init_result_free(struct es10b_zk_cert_init_result *result);

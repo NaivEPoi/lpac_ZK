@@ -8,7 +8,10 @@
 #include "profile/enable.h"
 #include "profile/list.h"
 #include "profile/nickname.h"
+#include "profile/zk-certinit.h"
 #include "profile/zk-download.h"
+#include "profile/zk-order.h"
+#include "profile/zk-register.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +21,7 @@
 static const struct applet_entry *applets[] = {
     &applet_profile_list,   &applet_profile_enable,    &applet_profile_disable,   &applet_profile_nickname,
     &applet_profile_delete, &applet_profile_download,  &applet_profile_discovery,
+    &applet_profile_zk_register, &applet_profile_zk_certinit, &applet_profile_zk_order,
     &applet_profile_zk_download, NULL,
 };
 

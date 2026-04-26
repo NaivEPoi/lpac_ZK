@@ -61,7 +61,9 @@ endif()
 
 if(NOT CMAKE_INSTALL_RPATH)
     if (STANDALONE_MODE)
-        cmake_policy(SET CMP0177 NEW)
+        if(POLICY CMP0177)
+            cmake_policy(SET CMP0177 NEW)
+        endif()
         # SHALL use semicolon-separated list so CMake can convert to platform separator.
         set(CMAKE_INSTALL_RPATH "${RPATH_BINARY_PATH};${RPATH_BINARY_PATH}/lib")
         set(CMAKE_INSTALL_PREFIX "")

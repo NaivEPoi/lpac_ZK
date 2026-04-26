@@ -1484,8 +1484,8 @@ void es10b_rat_list_free_all(struct es10b_rat *ratList) {
     }
 }
 
-int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileResponse,
-                                const uint8_t *mnoChallenge, uint32_t challengeLen) {
+int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileResponse, const uint8_t *mnoChallenge,
+                               uint32_t challengeLen) {
     int fret = 0;
     uint8_t reqbuf[21];
     uint8_t *respbuf = NULL;
@@ -1497,7 +1497,7 @@ int es10b_zk_profile_request_r(struct euicc_ctx *ctx, char **b64_ZKProfileRespon
         goto err;
     }
 
-    /* BF42 { 80 10 <16B challenge> } — value len = 2 + 16 = 18 = 0x12 */
+    /* BF42 { 80 10 <16B challenge> }, value len = 2 + 16 = 18 = 0x12 */
     reqbuf[0] = 0xBF;
     reqbuf[1] = 0x42;
     reqbuf[2] = 0x12;
@@ -1562,4 +1562,222 @@ exit:
     free(respbuf);
     respbuf = NULL;
     return fret;
+}
+
+static int b64_from_der_node(char **out, const struct euicc_derutil_node *node) {
+    *out = malloc(euicc_base64_encode_len(node->length));
+    if (!*out) {
+        return -1;
+    }
+    if (euicc_base64_encode(*out, node->value, node->length) < 0) {
+        free(*out);
+        *out = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+/* Common encoder for the ZK control messages whose ASN.1 request body is one
+ * context-0 field: ZkRegisterChallengeRequest, ZkRegisterCredentialRequest,
+ * ZkCertInitRequest, and ZkCertInstallRequest.
+ */
+static int es10b_zk_send_single_field_request(struct euicc_ctx *ctx, uint16_t outer_tag, const uint8_t *field,
+                                              uint32_t field_len, uint8_t **respbuf, unsigned *resplen) {
+    int fret = 0;
+    uint8_t *reqbuf = NULL;
+    uint32_t reqlen;
+    struct euicc_derutil_node n_request, n_field;
+
+    memset(&n_request, 0, sizeof(n_request));
+    memset(&n_field, 0, sizeof(n_field));
+
+    n_request.tag = outer_tag;
+    n_request.pack.child = &n_field;
+    n_field.tag = 0x80;
+    n_field.value = field;
+    n_field.length = field_len;
+
+    if (euicc_derutil_pack_alloc(&reqbuf, &reqlen, &n_request) < 0) {
+        goto err;
+    }
+    if (es10x_command(ctx, respbuf, resplen, reqbuf, reqlen) < 0) {
+        goto err;
+    }
+
+    goto exit;
+err:
+    fret = -1;
+    free(*respbuf);
+    *respbuf = NULL;
+exit:
+    free(reqbuf);
+    return fret;
+}
+
+static int es10b_zk_expect_empty_ok_response(uint16_t outer_tag, const uint8_t *respbuf, unsigned resplen) {
+    struct euicc_derutil_node n_outer, n_choice;
+
+    if (euicc_derutil_unpack_find_tag(&n_outer, outer_tag, respbuf, resplen) < 0) {
+        return -1;
+    }
+    if (euicc_derutil_unpack_find_tag(&n_choice, 0xA0, n_outer.value, n_outer.length) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+int es10b_zk_register_challenge_r(struct euicc_ctx *ctx, struct es10b_zk_register_challenge_result *result,
+                                  const uint8_t *mno_nonce_commitment, uint32_t mno_nonce_commitment_len) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+    struct euicc_derutil_node n_outer, n_choice, n_blinded_challenge, n_auth_sig;
+
+    memset(result, 0, sizeof(*result));
+
+    if (mno_nonce_commitment_len != 65) {
+        goto err;
+    }
+    if (es10b_zk_send_single_field_request(ctx, 0xBF44, mno_nonce_commitment, mno_nonce_commitment_len,
+                                           &respbuf, &resplen)
+        < 0) {
+        goto err;
+    }
+    if (euicc_derutil_unpack_find_tag(&n_outer, 0xBF44, respbuf, resplen) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_choice, 0xA0, n_outer.value, n_outer.length) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_blinded_challenge, 0x80, n_choice.value, n_choice.length) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_auth_sig, 0x81, n_choice.value, n_choice.length) < 0) {
+        goto err;
+    }
+    if (n_blinded_challenge.length != 32) {
+        goto err;
+    }
+    if (b64_from_der_node(&result->blindedEligibilityChallenge, &n_blinded_challenge) < 0 ||
+        b64_from_der_node(&result->deviceAuthSignature, &n_auth_sig) < 0) {
+        goto err;
+    }
+
+    goto exit;
+err:
+    fret = -1;
+    es10b_zk_register_challenge_result_free(result);
+exit:
+    free(respbuf);
+    return fret;
+}
+
+int es10b_zk_register_credential_r(struct euicc_ctx *ctx, const uint8_t *mno_partial_signature,
+                                   uint32_t mno_partial_signature_len) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+
+    if (mno_partial_signature_len != 32) {
+        goto err;
+    }
+    if (es10b_zk_send_single_field_request(ctx, 0xBF45, mno_partial_signature, mno_partial_signature_len,
+                                           &respbuf, &resplen)
+        < 0) {
+        goto err;
+    }
+    if (es10b_zk_expect_empty_ok_response(0xBF45, respbuf, resplen) < 0) {
+        goto err;
+    }
+
+    goto exit;
+err:
+    fret = -1;
+exit:
+    free(respbuf);
+    return fret;
+}
+
+int es10b_zk_cert_init_request_r(struct euicc_ctx *ctx, struct es10b_zk_cert_init_result *result,
+                                 const uint8_t *session_key_seed, uint32_t session_key_seed_len) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+    struct euicc_derutil_node n_outer, n_choice, n_user_pk, n_binding_sig, n_credential_hash;
+
+    memset(result, 0, sizeof(*result));
+
+    if (session_key_seed_len != 32) {
+        goto err;
+    }
+    if (es10b_zk_send_single_field_request(ctx, 0xBF46, session_key_seed, session_key_seed_len,
+                                           &respbuf, &resplen)
+        < 0) {
+        goto err;
+    }
+    if (euicc_derutil_unpack_find_tag(&n_outer, 0xBF46, respbuf, resplen) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_choice, 0xA0, n_outer.value, n_outer.length) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_user_pk, 0x80, n_choice.value, n_choice.length) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_binding_sig, 0x81, n_choice.value, n_choice.length) < 0 ||
+        euicc_derutil_unpack_find_tag(&n_credential_hash, 0x82, n_choice.value, n_choice.length) < 0) {
+        goto err;
+    }
+    if (n_user_pk.length != 65 || n_credential_hash.length != 32) {
+        goto err;
+    }
+    if (b64_from_der_node(&result->userPublicKey, &n_user_pk) < 0 ||
+        b64_from_der_node(&result->bindingSignature, &n_binding_sig) < 0 ||
+        b64_from_der_node(&result->credentialBindingHash, &n_credential_hash) < 0) {
+        goto err;
+    }
+
+    goto exit;
+err:
+    fret = -1;
+    es10b_zk_cert_init_result_free(result);
+exit:
+    free(respbuf);
+    return fret;
+}
+
+int es10b_zk_cert_install_r(struct euicc_ctx *ctx, const uint8_t *pseudonym_certificate,
+                            uint32_t pseudonym_certificate_len) {
+    int fret = 0;
+    uint8_t *respbuf = NULL;
+    unsigned resplen;
+
+    if (!pseudonym_certificate || pseudonym_certificate_len == 0) {
+        goto err;
+    }
+    if (es10b_zk_send_single_field_request(ctx, 0xBF47, pseudonym_certificate, pseudonym_certificate_len,
+                                           &respbuf, &resplen)
+        < 0) {
+        goto err;
+    }
+    if (es10b_zk_expect_empty_ok_response(0xBF47, respbuf, resplen) < 0) {
+        goto err;
+    }
+
+    goto exit;
+err:
+    fret = -1;
+exit:
+    free(respbuf);
+    return fret;
+}
+
+void es10b_zk_register_challenge_result_free(struct es10b_zk_register_challenge_result *result) {
+    if (!result) {
+        return;
+    }
+    free(result->blindedEligibilityChallenge);
+    free(result->deviceAuthSignature);
+    result->blindedEligibilityChallenge = NULL;
+    result->deviceAuthSignature = NULL;
+}
+
+void es10b_zk_cert_init_result_free(struct es10b_zk_cert_init_result *result) {
+    if (!result) {
+        return;
+    }
+    free(result->userPublicKey);
+    free(result->bindingSignature);
+    free(result->credentialBindingHash);
+    result->userPublicKey = NULL;
+    result->bindingSignature = NULL;
+    result->credentialBindingHash = NULL;
 }

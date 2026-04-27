@@ -2,7 +2,20 @@
 
 lpac is a cross-platform local profile agent program, compatible with [SGP.22 version 2.2.2](https://www.gsma.com/solutions-and-impact/technologies/esim/wp-content/uploads/2020/06/SGP.22-v2.2.2.pdf).
 
-Features:
+## Zero-Knowledge (ZK) eSIM Profile Support
+
+lpac includes specialized support for Zero-Knowledge eSIM provisioning workflows. ZK profiles can be provisioned through a series of cryptographic phases that maintain privacy and security:
+
+### ZK Profile Phases
+
+- **Order Phase** (`profile zk-order`): Initial profile ordering request to the MNO server, obtaining profile identifiers and metadata
+- **Registration Phase** (`profile zk-register`): ZK-based authentication and registration with MNO, using cryptographic commitments and partial signatures
+- **Certificate Initialization Phase** (`profile zk-certinit`): Secure certificate chain establishment and validation with the eUICC
+- **Download Phase** (`profile zk-download`): Final profile package download and installation on the eUICC
+
+These phases leverage ES10b (eUICC-side ZK operations) and ES12p (server-side ZK challenge/response) protocols for privacy-preserving profile provisioning.
+
+## Features:
 
 - Support Activation Code and Confirmation Code
 - Support Custom IMEI sent to server
